@@ -1,6 +1,6 @@
-"""Reelquarry web server.
+"""ClipViral web server.
 
-Run:  uvicorn reelquarry.main:app --host 0.0.0.0 --port 8000
+Run:  uvicorn clipviral.main:app --host 0.0.0.0 --port 8000
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Reelquarry", lifespan=lifespan)
+app = FastAPI(title="ClipViral", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=config.WEB_DIR), name="static")
 
 

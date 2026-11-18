@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from reelquarry import config
-from reelquarry.pipeline import captions, highlights, reframe, render, transcribe
+from clipviral import config
+from clipviral.pipeline import captions, highlights, reframe, render, transcribe
 
 SRT = """1
 00:00:01,000 --> 00:00:04,000

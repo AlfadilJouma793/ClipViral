@@ -19,14 +19,14 @@ _detectors: dict = {}
 def _faces(frame) -> list[tuple[float, float, float, float]]:
     """Detect faces on a frame already resized to ANALYSIS_W wide.
 
-    Uses OpenCV's YuNet DNN when REELQUARRY_FACE_MODEL points at
+    Uses OpenCV's YuNet DNN when CLIPVIRAL_FACE_MODEL points at
     face_detection_yunet_2023mar.onnx (much more robust: profiles, small and
     partly-lit faces); otherwise frontal + profile Haar cascades.
     """
     import cv2
 
     h, w = frame.shape[:2]
-    model = os.environ.get("REELQUARRY_FACE_MODEL", "")
+    model = os.environ.get("CLIPVIRAL_FACE_MODEL", "")
     if model and Path(model).exists() and not _detectors.get("yunet_failed"):
         try:
             det = _detectors.get("yunet")

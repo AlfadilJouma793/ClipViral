@@ -1,8 +1,8 @@
-# Reelquarry
+# ClipViral
 
 **One long video in. A week of shorts out.**
 
-Reelquarry turns a 30-minute, 1-hour or 2-hour video (podcast, webinar, property tour, course lesson) into ranked, ready-to-post vertical clips for TikTok, Instagram Reels and YouTube Shorts.
+ClipViral turns a 30-minute, 1-hour or 2-hour video (podcast, webinar, property tour, course lesson) into ranked, ready-to-post vertical clips for TikTok, Instagram Reels and YouTube Shorts.
 
 Upload → transcribe every word → find the best moments → reframe to 9:16 around the speaker → animated captions + hook → download.
 
@@ -38,7 +38,7 @@ cp .env.example .env   # add your ANTHROPIC_API_KEY
 ```
 
 ```bash
-set -a && source .env && set +a && uvicorn reelquarry.main:app --reload --port 8000
+set -a && source .env && set +a && uvicorn clipviral.main:app --reload --port 8000
 ```
 
 Open http://localhost:8000 for the landing page and http://localhost:8000/studio for the app.
@@ -48,17 +48,17 @@ The first transcription downloads the Whisper model (~150 MB for `base`) from hu
 ### Docker
 
 ```bash
-docker build -t reelquarry .
+docker build -t clipviral .
 ```
 
 ```bash
-docker run -p 8000:8000 -v reelquarry-data:/data -e ANTHROPIC_API_KEY=sk-ant-... reelquarry
+docker run -p 8000:8000 -v clipviral-data:/data -e ANTHROPIC_API_KEY=sk-ant-... clipviral
 ```
 
 ## How it works
 
 ```
-reelquarry/
+clipviral/
   main.py               FastAPI: upload, jobs, clip edits, downloads, ZIP export
   jobs.py               job store (one folder per project) + background worker queue
   pipeline/
@@ -76,7 +76,7 @@ tests/                  pytest suite (includes a real ffmpeg render)
 
 **Highlight detection with Claude** (`highlights.py`): the transcript is sent as numbered sentences with timestamps and vocal-energy tags. Claude returns a validated `ClipPlan` (Pydantic structured output) with sentence ranges, hook, scores, reasoning, emphasis words, hashtags and per-platform captions. Ranges are then fitted to the requested length, and overlapping picks are dropped. A refusal or API failure falls back to the offline scorer, so a job never fails because of the AI step.
 
-**Face tracking** (`reframe.py`): uses YuNet (set `REELQUARRY_FACE_MODEL`, baked into the Docker image), else dlib's HOG detector, else OpenCV Haar cascades.
+**Face tracking** (`reframe.py`): uses YuNet (set `CLIPVIRAL_FACE_MODEL`, baked into the Docker image), else dlib's HOG detector, else OpenCV Haar cascades.
 
 ## Tests
 
@@ -95,6 +95,6 @@ python scripts/make_demo_video.py demo
 - User accounts and authentication. The API is currently open to anyone who can reach the server.
 - Stripe billing and enforcing plan limits (upload minutes per month, max video length).
 - Object storage (S3/R2) and a CDN for uploads and renders, plus auto-deleting old projects.
-- A GPU worker pool for faster transcription at scale (set `REELQUARRY_WHISPER_DEVICE=cuda`, `REELQUARRY_WORKERS`).
+- A GPU worker pool for faster transcription at scale (set `CLIPVIRAL_WHISPER_DEVICE=cuda`, `CLIPVIRAL_WORKERS`).
 - Importing from a YouTube/Drive link, and direct publishing to TikTok, Instagram and YouTube.
 - Resumable or chunked uploads for multi-GB files on poor connections.

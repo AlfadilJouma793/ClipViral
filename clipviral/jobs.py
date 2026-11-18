@@ -16,7 +16,7 @@ from . import config
 from .pipeline import highlights, media, render, transcribe
 from .pipeline.niches import get_niche
 
-log = logging.getLogger("reelquarry.jobs")
+log = logging.getLogger("clipviral.jobs")
 _lock = threading.RLock()
 _q: "queue.Queue[tuple[str, str, str | None]]" = queue.Queue()
 

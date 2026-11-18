@@ -23,7 +23,7 @@ from .. import config
 from .media import window_energy
 from .niches import get_niche
 
-log = logging.getLogger("reelquarry.highlights")
+log = logging.getLogger("clipviral.highlights")
 
 
 # --------------------------------------------------------------------------- schema
@@ -91,7 +91,7 @@ def _overlaps(a: tuple[float, float], b: tuple[float, float]) -> bool:
 
 
 # --------------------------------------------------------------------------- Claude engine
-SYSTEM = """You are Reelquarry's senior short-form video editor. You have cut thousands of \
+SYSTEM = """You are ClipViral's senior short-form video editor. You have cut thousands of \
 viral TikToks, Reels and Shorts from long-form podcasts, interviews, webinars and vlogs.
 
 You receive a transcript split into numbered sentences with timestamps. Sentences tagged \

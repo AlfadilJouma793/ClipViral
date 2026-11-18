@@ -1,5 +1,5 @@
 """Audience presets. Each one tunes what counts as a great moment, the hook
-voice, hashtags and default look — the main thing that separates Reelquarry
+voice, hashtags and default look — the main thing that separates ClipViral
 from generic clippers."""
 from __future__ import annotations
 
