@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reelquarry Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+</head>
+<body>
+<nav class="nav">
+  <div class="wrap" style="max-width:1480px">
+    <a class="logo" href="/"><img src="/static/logo.svg" alt="" width="30" height="30">Reelquarry <span class="pill" style="margin-left:4px">Studio</span></a>
+    <div class="links"><a href="/#pricing">Pricing</a><a href="/">Home</a></div>
+  </div>
+</nav>
+
+<div class="studio">
+  <aside class="side">
+    <form class="panel" id="newForm">
+      <h2>New project</h2>
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose a video file">
+        <b>Drop your long video here</b>
+        <span>MP4, MOV, MKV, WEBM · up to <span id="maxgb">8</span> GB</span>
+        <div class="file" id="fileName"></div>
+        <input type="file" id="file" accept="video/*,.mkv" hidden>
+      </div>
+
+      <label class="f">Who is it for?</label>
+      <div class="chips" id="niches"></div>
+
+      <label class="f">Clip length</label>
+      <div class="chips" id="lengths">
+        <button type="button" class="chip" data-v="15,30">15–30s</button>
+        <button type="button" class="chip on" data-v="20,60">20–60s</button>
+        <button type="button" class="chip" data-v="30,90">30–90s</button>
+      </div>
+
+      <label class="f">Number of clips: <span id="numOut">8</span></label>
+      <input type="range" id="num" min="1" max="20" value="8">
+
+      <label class="f">Caption style</label>
+      <div class="chips" id="styles"></div>
+
+      <label class="f">Brand colour & watermark</label>
+      <div class="row">
+        <input type="color" id="accent" value="#ffe14d" aria-label="Accent colour">
+        <input type="text" id="watermark" placeholder="@yourhandle (optional)" maxlength="40">
+      </div>
+
+      <details class="more">
+        <summary>More options</summary>
+        <label class="f">Framing</label>
+        <select id="layout"></select>
+        <label class="f">Caption position</label>
+        <select id="position"><option value="lower">Lower third</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select>
+        <label class="f">Tell the AI what to look for</label>
+        <textarea id="prompt" maxlength="500" placeholder="e.g. Only the parts about mortgages and first-time buyers"></textarea>
+        <label class="f">Language (blank = auto-detect)</label>
+        <input type="text" id="language" placeholder="en, es, fr, ar…" maxlength="5">
+        <label class="f">Existing transcript (optional .srt / .vtt)</label>
+        <input type="file" id="transcript" accept=".srt,.vtt">
+        <div style="margin-top:10px">
+          <label class="toggle">Remove long pauses <input type="checkbox" id="tighten" checked></label>
+          <label class="toggle">Hook headline on screen <input type="checkbox" id="showHook" checked></label>
+          <label class="toggle">Progress bar <input type="checkbox" id="progressBar" checked></label>
+        </div>
+      </details>
+
+      <button class="btn btn-primary" style="width:100%;margin-top:18px" id="go" disabled>Find my clips</button>
+      <div class="upbar" id="upbar"><div></div></div>
+      <div class="small" id="upmsg" style="margin-top:8px"></div>
+    </form>
+
+    <div class="panel">
+      <h2>Projects</h2>
+      <div class="projects" id="projects"><div class="small">No projects yet.</div></div>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+    <div id="banners"></div>
+    <div class="empty" id="empty">
+      <h2>Drop in a podcast, webinar or tour</h2>
+      <p>Your ranked, captioned, ready-to-post clips will appear here.</p>
+    </div>
+    <div id="job" hidden></div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<script src="/static/studio.js"></script>
+</body>
+</html>
