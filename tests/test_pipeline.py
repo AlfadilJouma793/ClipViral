@@ -156,7 +156,7 @@ def test_render_clip_end_to_end(tmp_path, words):
     probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                             "stream=width,height", "-of", "csv=p=0", str(out)], capture_output=True, text=True)
     assert probe.stdout.strip() == f"{config.OUT_W},{config.OUT_H}"
-    assert info["layout_used"] == "fit"  # no faces in a test pattern
+    assert info["layout_used"] in ("smart", "fit")  # no faces: follows motion, else fits
     assert info["tightened_by"] > 1.0  # the 2.5s gap in the SRT was tightened
 
 
@@ -233,3 +233,167 @@ def test_new_platform_presets_exist():
     keys = {n["key"] for n in public_niches()}
     assert {"tiktok", "instagram", "x"} <= keys
     assert NICHES["x"]["lengths"] == [30, 90]
+
+
+# ---------------------------------------------------------------- editing & render features
+def _talk_video(path, seconds=24, size="1280x720"):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc2=size={size}:rate=25",
+                    "-f", "lavfi", "-i", "sine=frequency=300:sample_rate=44100", "-t", str(seconds),
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path)], check=True)
+
+
+def _dims(path):
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                          "stream=width,height", "-show_entries", "format=duration", "-of", "json", str(path)],
+                         capture_output=True, text=True).stdout
+    import json as _j
+    d = _j.loads(out)
+    return d["streams"][0]["width"], d["streams"][0]["height"], float(d["format"]["duration"])
+
+
+def test_subtract_and_filler_spans():
+    assert render.subtract([(0, 10)], [(2, 3), (5, 6)]) == [(0, 2), (3, 5), (6, 10)]
+    assert render.subtract([(0, 4), (6, 9)], [(3, 7)]) == [(0, 3), (7, 9)]
+    ws = [{"w": "so", "s": 0, "e": 0.3}, {"w": "um,", "s": 0.4, "e": 0.8}, {"w": "yes", "s": 0.9, "e": 1.2}]
+    spans = render.filler_spans(ws)
+    assert len(spans) == 1 and spans[0][0] < 0.4 and spans[0][1] > 0.8
+
+
+def test_emoji_events_detected(tmp_path):
+    ws = [{"w": "This", "s": 0.0, "e": 0.3}, {"w": "house", "s": 0.3, "e": 0.7},
+          {"w": "costs", "s": 0.7, "e": 1.0}, {"w": "money.", "s": 1.0, "e": 1.4},
+          {"w": "Huge", "s": 3.5, "e": 3.8}, {"w": "mortgage", "s": 3.8, "e": 4.3}, {"w": "rates.", "s": 4.3, "e": 4.8}]
+    ev = captions.build_ass(ws, 6, tmp_path / "e.ass", style="bold", emojis=True)
+    assert ev and all((render.ASSETS / "emoji" / f"{c}.png").exists() for _, _, c in ev)
+    assert ev[0][2] == "1f3e0"  # house
+    assert captions.build_ass(ws, 6, tmp_path / "f.ass", emojis=False) == []
+
+
+@pytest.mark.parametrize("aspect", ["1:1", "4:5", "16:9"])
+def test_render_other_aspects(tmp_path, words, aspect):
+    src = tmp_path / "src.mp4"
+    _talk_video(src, 16)
+    meta = {"width": 1280, "height": 720, "duration": 16, "has_audio": True, "fps": 25}
+    clip = {"id": "a1", "start": 1.0, "end": 9.0, "hook": "Shape test", "aspect": aspect, "track": None}
+    info = render.render_clip(tmp_path, src, meta, clip, words, {"layout": "auto", "style": "boxed"})
+    w, h, _ = _dims(tmp_path / "a1.mp4")
+    assert (w, h) == render.ASPECTS[aspect] and info["size"] == [w, h]
+
+
+def test_render_cuts_fillers_manual_crop_emoji_logo_font(tmp_path):
+    from clipviral import brands
+    src = tmp_path / "src.mp4"
+    _talk_video(src, 14)
+    ws = [{"w": "Buying", "s": 1.0, "e": 1.4}, {"w": "a", "s": 1.4, "e": 1.5}, {"w": "house", "s": 1.5, "e": 2.0},
+          {"w": "um", "s": 2.1, "e": 2.6}, {"w": "costs", "s": 2.7, "e": 3.1}, {"w": "money.", "s": 3.1, "e": 3.6},
+          {"w": "Delete", "s": 3.8, "e": 4.2}, {"w": "these", "s": 4.2, "e": 4.6}, {"w": "words", "s": 4.6, "e": 5.0},
+          {"w": "please.", "s": 5.0, "e": 5.4}, {"w": "Mortgage", "s": 5.6, "e": 6.2}, {"w": "rates", "s": 6.2, "e": 6.6},
+          {"w": "matter.", "s": 6.6, "e": 7.2}]
+    # brand with logo + custom font
+    b = brands.create({"name": "Client A", "accent": "#00C2FF"})
+    import cv2
+    import numpy as np
+    logo = np.zeros((80, 200, 4), np.uint8)
+    logo[:, :, 1] = 200
+    logo[:, :, 3] = 255
+    b = brands.set_logo(b["id"], cv2.imencode(".png", logo)[1].tobytes())
+    font = Path("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf")
+    if font.exists():
+        b = brands.set_font(b["id"], font.read_bytes(), "DejaVuSerif-Bold.ttf")
+        assert b["font_family"]
+    opts = {"layout": "auto", "style": "bold", "tighten": False, "cut_fillers": True, "emojis": True,
+            **brands.render_opts(b["id"])}
+    assert "logo" in opts
+    clip = {"id": "m1", "start": 0.5, "end": 8.0, "hook": "Edit test", "layout": "manual", "crop_x": 0.2,
+            "cuts": [[3.8, 5.45]], "track": None}
+    info = render.render_clip(tmp_path, src, {"width": 1280, "height": 720, "duration": 14, "has_audio": True},
+                              clip, ws, opts)
+    _, _, d = _dims(tmp_path / "m1.mp4")
+    # 7.5s clip minus "um" (~0.56s) minus the deleted words (1.65s)
+    assert 4.9 < d < 5.6, d
+    assert info["layout_used"] == "manual" and info["emoji_count"] >= 1
+    srt = (tmp_path / "m1.srt").read_text()
+    assert "Delete" not in srt and "um" not in srt.split()
+    if font.exists():
+        assert "fontsdir=" in (tmp_path / "m1.filter").read_text()
+        assert b["font_family"] in (tmp_path / "m1.ass").read_text()
+    brands.delete(b["id"])
+
+
+def test_motion_tracking_follows_moving_subject(tmp_path):
+    # a white square moving from left to right on black
+    src = tmp_path / "move.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=25:d=8",
+                    "-f", "lavfi", "-i", "color=c=white:s=120x120:r=25:d=8",
+                    "-filter_complex", "[0][1]overlay=x='min(1100,t*150)':y=300",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)], check=True)
+    samples = reframe.track_motion(src, 0, 8)
+    xs = [c for _, c in samples if c is not None]
+    assert len(xs) > 10 and xs[0] < 0.25 and xs[-1] > 0.7
+    keys = reframe.plan_path(samples, 8, 405 / 1280)
+    assert keys and keys[-1][1] > keys[0][1]
+
+
+def test_api_brands_words_and_clip_edits(monkeypatch, tmp_path):
+    import json as _j
+    from fastapi.testclient import TestClient
+    from clipviral import brands, jobs, main
+    monkeypatch.setattr(config, "JOBS_DIR", tmp_path / "jobs")
+    (tmp_path / "jobs").mkdir()
+    monkeypatch.setattr(brands, "BRANDS_DIR", tmp_path / "brands")
+    queued = []
+    monkeypatch.setattr(jobs, "enqueue", lambda *a, **k: queued.append(a))
+    c = TestClient(main.app)
+
+    # brands
+    r = c.post("/api/brands", json={"name": "Client", "accent": "#112233", "aspect": "4:5", "emojis": True})
+    assert r.status_code == 200, r.text
+    bid = r.json()["id"]
+    assert c.post("/api/brands", json={"name": "Bad", "accent": "red"}).status_code == 400
+    assert c.post("/api/brands", json={"name": "Bad", "aspect": "3:2"}).status_code == 400
+    assert c.post(f"/api/brands/{bid}/logo", files={"file": ("x.png", b"not an image")}).status_code == 400
+    assert c.post(f"/api/brands/{bid}/font", files={"file": ("x.txt", b"x")}).status_code == 400
+    import cv2
+    import numpy as np
+    png = cv2.imencode(".png", np.full((20, 40, 3), 200, np.uint8))[1].tobytes()
+    r = c.post(f"/api/brands/{bid}/logo", files={"file": ("l.png", png)})
+    assert r.status_code == 200 and r.json()["logo_url"]
+    assert c.get(r.json()["logo_url"]).status_code == 200
+    assert [b["name"] for b in c.get("/api/brands").json()] == ["Client"]
+
+    # a finished job with one clip
+    job = jobs.create("demo", {"niche": "general", "aspect": "4:5", "brand_id": bid})
+    assert job["options"]["aspect"] == "4:5" and job["options"]["brand_id"] == bid
+    words = transcribe.parse_subtitles(SRT)["words"]
+    d = jobs.job_dir(job["id"])
+    (d / "transcript.json").write_text(_j.dumps({"words": words}))
+    jobs.update(job["id"], status="done", meta={"duration": 30, "width": 1280, "height": 720, "has_audio": True},
+                source="source.mp4", clips=[{"id": "c01", "start": 4.2, "end": 14.0, "hook": "h", "style": "bold",
+                                             "layout": "auto", "accent": "#FFE14D", "position": "lower",
+                                             "aspect": "4:5", "cuts": [], "status": "ready", "track": [[0, 0.5]]}])
+    r = c.get(f"/api/jobs/{job['id']}/clips/c01/words")
+    assert r.status_code == 200
+    ws = r.json()["words"]
+    inside = [w for w in ws if w["in"]]
+    assert inside and any(not w["in"] for w in ws)  # context words included
+
+    cut = [inside[1]["s"], inside[2]["e"]]
+    r = c.patch(f"/api/jobs/{job['id']}/clips/c01",
+                json={"cuts": [cut], "aspect": "1:1", "crop_x": 0.3, "emojis": True})
+    assert r.status_code == 200, r.text
+    clip = jobs.load(job["id"])["clips"][0]
+    assert clip["cuts"] == [[round(cut[0], 3), round(cut[1], 3)]] and clip["aspect"] == "1:1"
+    assert clip["layout"] == "manual" and clip["crop_x"] == 0.3 and clip["track"] is None and clip["emojis"] is True
+    assert queued[-1] == (job["id"], "render", "c01")
+    assert c.get(f"/api/jobs/{job['id']}/clips/c01/words").json()["words"][[w["s"] for w in ws].index(inside[1]["s"])]["cut"]
+    assert c.patch(f"/api/jobs/{job['id']}/clips/c01", json={"aspect": "2:3"}).status_code == 400
+    # end beyond the video is capped to the video length (30s here)
+    assert c.patch(f"/api/jobs/{job['id']}/clips/c01", json={"start": 0, "end": 1000}).status_code == 200
+    assert jobs.load(job["id"])["clips"][0]["end"] == 30
+    # on a long video, clips longer than 15 minutes are refused
+    jobs.update(job["id"], meta={"duration": 3600, "width": 1280, "height": 720, "has_audio": True})
+    r = c.patch(f"/api/jobs/{job['id']}/clips/c01", json={"start": 0, "end": 901})
+    assert r.status_code == 400 and "15 minutes" in r.json()["detail"]
+    assert c.patch(f"/api/jobs/{job['id']}/clips/c01", json={"start": 0, "end": 900}).status_code == 200
+    r = c.patch(f"/api/jobs/{job['id']}/clips/c01", json={"start": 1, "end": 2})
+    assert r.status_code == 400  # < 3 seconds

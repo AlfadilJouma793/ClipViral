@@ -177,3 +177,59 @@ def crop_x_expr(keys: list[tuple[float, float]], src_w: int, crop_w: int) -> str
             seg = f"({x0:.1f}+({x1 - x0:.1f})*({p}*{p}*(3-2*{p})))"
         expr = f"if(lt(t,{t1:.3f}),{seg},{expr})"
     return expr
+
+
+def track_motion(video: Path, start: float, end: float, sample_fps: float = 2.5) -> list[tuple[float, float | None]]:
+    """Follow the main moving subject (any object) via frame differencing.
+
+    Used when there is no face: sports, products, pets, gameplay, demos.
+    Returns [(t_rel, cx_norm|None)] like track_faces.
+    """
+    import cv2
+
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        return []
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    stride = max(1, int(round(fps / sample_fps)))
+    cap.set(cv2.CAP_PROP_POS_MSEC, start * 1000)
+    t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0 or start
+    prev = None
+    samples: list[tuple[float, float | None]] = []
+    while t < end:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        for _ in range(stride - 1):
+            cap.grab()
+        h, w = frame.shape[:2]
+        small = cv2.resize(frame, (320, max(1, int(h * 320 / w))))
+        gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        cx = None
+        if prev is not None:
+            diff = cv2.absdiff(gray, prev)
+            _, mask = cv2.threshold(diff, 18, 255, cv2.THRESH_BINARY)
+            cols = mask.sum(axis=0).astype(np.float64)
+            mass = cols.sum() / 255.0
+            frac = mass / mask.size
+            # ignore near-static frames and whole-frame changes (camera cuts / pans)
+            if 0.002 < frac < 0.45:
+                xs = np.arange(cols.size)
+                cx = float((cols * xs).sum() / cols.sum()) / cols.size
+        samples.append((t - start, cx))
+        prev = gray
+        t += stride / fps
+    cap.release()
+    return samples
+
+
+def track_subject(video: Path, start: float, end: float) -> list[tuple[float, float | None]]:
+    """Faces first; if too few faces are visible, follow motion instead."""
+    faces = track_faces(video, start, end)
+    found = sum(1 for _, c in faces if c is not None)
+    if faces and found >= 0.25 * len(faces):
+        return faces
+    motion = track_motion(video, start, end)
+    if sum(1 for _, c in motion if c is not None) >= 0.25 * max(1, len(motion)):
+        return motion
+    return faces

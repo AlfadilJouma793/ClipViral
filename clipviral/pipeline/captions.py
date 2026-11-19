@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 from .. import config
+from .emoji_map import WORD_TO_EMOJI
 
 STYLES = {
     "bold": "Bold Pop",
@@ -60,16 +61,26 @@ def _chunks(words: list[dict], max_words: int, max_chars: int, max_gap: float = 
     return out
 
 
+def caption_margin(position: str, H: int) -> int:
+    """Distance from the bottom edge to the caption baseline area."""
+    return {"middle": int(H * 0.40), "lower": int(H * 0.27), "bottom": int(H * 0.12)}.get(position, int(H * 0.27))
+
+
 def build_ass(words: list[dict], duration: float, path: Path, *, style: str = "bold",
               accent: str = "#FFE14D", position: str = "lower", hook: str = "",
               hook_seconds: float = 3.2, emphasis: list[str] | None = None,
-              progress_bar: bool = True, watermark: str = "") -> None:
-    """`words` are clip-relative (0 = clip start)."""
-    W, H = config.OUT_W, config.OUT_H
+              progress_bar: bool = True, watermark: str = "", size: tuple[int, int] | None = None,
+              font: str = "", emojis: bool = False) -> list[tuple[float, float, str]]:
+    """Write the ASS file. `words` are clip-relative (0 = clip start).
+
+    Returns emoji events [(start, end, codepoint)] for the renderer to overlay
+    (libass can't draw colour emoji, so they are composited as PNGs).
+    """
+    W, H = size or (config.OUT_W, config.OUT_H)
     acc = _ass_color(accent)
     white, black = "&H00FFFFFF", "&H00000000"
     emph = {re.sub(r"[^\w£$%']", "", e.lower()) for e in (emphasis or []) if e}
-    margin_v = {"middle": int(H * 0.40), "lower": int(H * 0.27), "bottom": int(H * 0.12)}.get(position, int(H * 0.27))
+    margin_v = caption_margin(position, H)
 
     if style == "bold":
         base = f"Style: Cap,Inter Black,88,{white},{white},{black},&H90000000,-1,0,0,0,100,100,0,0,1,7,3,2,60,60,{margin_v},1"
@@ -85,6 +96,11 @@ def build_ass(words: list[dict], duration: float, path: Path, *, style: str = "b
     hook_style = f"Style: Hook,Inter Black,74,&H00111111,{white},{white},&H00000000,-1,0,0,0,100,100,0,0,3,22,0,8,80,80,{int(H * 0.11)},1"
     wm_style = f"Style: Mark,Inter SemiBold,40,&H50FFFFFF,{white},&H90000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,9,50,50,60,1"
     bar_style = f"Style: Bar,Inter,10,{acc},{acc},{acc},{acc},0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1"
+    if font:  # brand font replaces Inter for captions and the hook
+        safe = re.sub(r"[,\r\n]", " ", font).strip()[:60]
+        for weight in ("Inter Black", "Inter ExtraBold", "Inter SemiBold"):
+            base = base.replace(weight, safe)
+            hook_style = hook_style.replace(weight, safe)
 
     lines = [
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {W}", f"PlayResY: {H}",
@@ -112,11 +128,19 @@ def build_ass(words: list[dict], duration: float, path: Path, *, style: str = "b
     def is_emph(w: str) -> bool:
         return re.sub(r"[^\w£$%']", "", w.lower()) in emph
 
+    emoji_events: list[tuple[float, float, str]] = []
     for gi, g in enumerate(groups):
         g_start = g[0]["s"]
         nxt = groups[gi + 1][0]["s"] if gi + 1 < len(groups) else duration
         g_end = min(nxt, g[-1]["e"] + 0.5) if nxt - g[-1]["e"] < 0.8 else g[-1]["e"] + 0.25
         g_end = min(g_end, duration)
+        if emojis:
+            code = next((WORD_TO_EMOJI[k] for k in (re.sub(r"[^\w£$%]", "", x["w"].lower()) for x in g)
+                         if k in WORD_TO_EMOJI), None)
+            last = emoji_events[-1] if emoji_events else None
+            # at most one emoji per caption group, spaced out, never the same twice in a row
+            if code and g_end - g_start >= 0.4 and (last is None or (g_start - last[1] >= 1.5 and code != last[2])):
+                emoji_events.append((round(g_start, 3), round(min(g_end, g_start + 2.2), 3), code))
         if style == "minimal":
             txt = " ".join(_esc(w["w"]) for w in g)
             lines.append(f"Dialogue: 1,{_t(g_start)},{_t(g_end)},Cap,,0,0,0,,{{\\fad(80,60)}}{txt}")
@@ -170,6 +194,7 @@ def build_ass(words: list[dict], duration: float, path: Path, *, style: str = "b
         )
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return emoji_events
 
 
 def build_srt(words: list[dict], path: Path) -> None:

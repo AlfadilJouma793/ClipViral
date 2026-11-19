@@ -215,39 +215,56 @@ def heuristic_plan(sents: list[dict], words: list[dict], curve: np.ndarray, nich
     e_mu, e_sd = float(sent_energy.mean()), float(sent_energy.std() or 1.0)
     hooks = [_hook_score(s["text"], kw) for s in sents]
 
+    # Per-sentence features, accumulated incrementally below so long clips
+    # (up to 15 minutes) stay fast: O(sentences x window) cheap additions.
+    n_sent = len(sents)
+    s_toks = [len(x["text"].split()) for x in sents]
+    s_kw = [sum(x["text"].lower().count(k) for k in kw) for x in sents]
+    s_fill = [sum(1 for t in x["text"].split() if _FILLER.match(t)) for x in sents]
+    s_payoff = []
+    for x in sents:
+        last = x["text"].strip()
+        pay = 0.6 if last.endswith((".", "!")) else 0.2
+        if any(_norm(w) in _PAYOFF for w in last.split()[:3]):
+            pay += 0.25
+        if last.endswith("!"):
+            pay += 0.15
+        s_payoff.append(pay)
+    s_dangling = [0.25 if re.match(r"^(and|but|so|because|which|it|that|this|he|she|they)\b",
+                                   x["text"].strip(), re.I) else 0.0 for x in sents]
+    s_break = [1 if k + 1 < n_sent and sents[k + 1]["s"] - sents[k]["e"] > 1.1 else 0 for k in range(n_sent)]
+
     cands = []
-    for a in range(len(sents)):
-        for b in range(a, len(sents)):
+    for a in range(n_sent):
+        toks = kw_hits = fillers = breaks = 0
+        e_sum, e_max = 0.0, -1e9
+        hook, hook_reasons = hooks[a]
+        for b in range(a, n_sent):
+            toks += s_toks[b]
+            kw_hits += s_kw[b]
+            fillers += s_fill[b]
+            e_sum += float(sent_energy[b])
+            e_max = max(e_max, float(sent_energy[b]))
+            if b > a:
+                breaks += s_break[b - 1]
             dur = sents[b]["e"] - sents[a]["s"]
             if dur > max_len:
                 break
             if dur < min_len:
                 continue
-            text = " ".join(s["text"] for s in sents[a:b + 1])
-            low = text.lower()
-            toks = [_norm(w) for w in text.split()]
-            hook, hook_reasons = hooks[a]
-            energy_z = float((sent_energy[a:b + 1].mean() - e_mu) / e_sd)
-            peak_z = float((sent_energy[a:b + 1].max() - e_mu) / e_sd)
-            wpm = len(toks) / dur * 60
+            energy_z = (e_sum / (b - a + 1) - e_mu) / e_sd
+            peak_z = (e_max - e_mu) / e_sd
+            wpm = toks / dur * 60
             pace = 1.0 - min(1.0, abs(wpm - 170) / 120)
-            kw_hits = sum(low.count(k) for k in kw)
             kw_score = min(1.0, kw_hits / max(1.0, dur / 12))
-            fillers = sum(1 for t in text.split() if _FILLER.match(t))
-            filler_pen = min(0.3, fillers / max(1, len(toks)) * 3)
-            last = sents[b]["text"].strip()
-            payoff = 0.6 if last.endswith((".", "!")) else 0.2
-            if any(_norm(w) in _PAYOFF for w in last.split()[:3]):
-                payoff += 0.25
-            if last.endswith("!"):
-                payoff += 0.15
-            dangling = 0.25 if re.match(r"^(and|but|so|because|which|it|that|this|he|she|they)\b",
-                                        sents[a]["text"].strip(), re.I) else 0.0
-            # long silences inside a clip usually mean the topic changed
-            topic_breaks = sum(1 for k in range(a, b) if sents[k + 1]["s"] - sents[k]["e"] > 1.1)
+            filler_pen = min(0.3, fillers / max(1, toks) * 3)
+            payoff = s_payoff[b]
+            dangling = s_dangling[a]
+            # long silences inside a clip usually mean the topic changed (per minute for long clips)
+            topic_pen = 0.12 * breaks / max(1.0, dur / 60)
             score = (0.34 * hook + 0.16 * np.tanh(energy_z) + 0.08 * np.tanh(peak_z)
                      + 0.12 * pace + 0.15 * kw_score + 0.15 * min(1.0, payoff)
-                     - filler_pen - dangling - 0.12 * topic_breaks)
+                     - filler_pen - dangling - topic_pen)
             cands.append((score, a, b, hook, hook_reasons, energy_z, peak_z, pace, kw_score, payoff, dangling))
 
     cands.sort(key=lambda c: c[0], reverse=True)

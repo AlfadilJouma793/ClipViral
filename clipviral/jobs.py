@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 from . import config
+from . import brands
 from .pipeline import fetch, highlights, media, render, transcribe
 from .pipeline.niches import get_niche
 
@@ -97,6 +98,11 @@ def create(name: str, options: dict) -> dict:
         "watermark": (options.get("watermark") or "")[:40],
         "language": options.get("language") or None,
         "prompt": (options.get("prompt") or "")[:500],
+        "aspect": options.get("aspect") if options.get("aspect") in render.ASPECTS else "9:16",
+        "emojis": bool(options.get("emojis", False)),
+        "cut_fillers": bool(options.get("cut_fillers", True)),
+        "brand_id": options.get("brand_id") or None,
+        "broll": bool(options.get("broll", False)),
     }
     opts["max_len"] = max(opts["max_len"], opts["min_len"] + 5)
     job = {"id": job_id, "name": name, "status": "uploading", "step": "upload", "progress": 0,
@@ -173,7 +179,8 @@ def process(job_id: str) -> None:
         clips.append({**p, "id": f"c{i + 1:02d}", "status": "queued", "rank": i + 1,
                       "transcript": " ".join(s["text"] for s in sents[p["s_idx"]:p["e_idx"] + 1]),
                       "style": opts["style"], "layout": opts["layout"], "accent": opts["accent"],
-                      "position": opts["position"], "track": None})
+                      "position": opts["position"], "aspect": opts.get("aspect", "9:16"),
+                      "emojis": opts.get("emojis", False), "cuts": [], "track": None})
     update(job_id, clips=clips, notes=job.get("notes", []) + notes,
            engine=picks[0].get("engine"), transcript_source=tr.get("source"))
 
@@ -198,6 +205,7 @@ def _render_one(job_id: str, clip_id: str, words: list[dict] | None = None, meta
     _patch_clip(job_id, clip_id, status="rendering")
     opts = {**job["options"], "style": clip["style"], "layout": clip["layout"],
             "accent": clip["accent"], "position": clip["position"]}
+    opts.update(brands.render_opts(opts.get("brand_id")))
     try:
         info = render.render_clip(d, d / job["source"], meta, clip, words, opts)
         _patch_clip(job_id, clip_id, status="ready", track=clip.get("track"),
@@ -222,15 +230,33 @@ def edit_clip(job_id: str, clip_id: str, changes: dict) -> dict:
     """Apply user edits; re-render if anything visual changed."""
     job = load(job_id)
     clip = next(c for c in job["clips"] if c["id"] == clip_id)
-    allowed = {"hook", "title", "style", "layout", "accent", "position", "start", "end", "emphasis"}
+    allowed = {"hook", "title", "style", "layout", "accent", "position", "start", "end", "emphasis",
+               "aspect", "emojis", "crop_x", "cuts"}
     fields = {k: v for k, v in changes.items() if k in allowed and v is not None}
+    if "aspect" in fields:
+        if fields["aspect"] not in render.ASPECTS:
+            raise ValueError("Unknown aspect ratio.")
+        if fields["aspect"] != clip.get("aspect", "9:16"):
+            fields["track"] = None  # crop width changes with the shape
+    if "crop_x" in fields:
+        fields["crop_x"] = round(min(1.0, max(0.0, float(fields["crop_x"]))), 4)
+        fields.setdefault("layout", "manual")
+    if "emojis" in fields:
+        fields["emojis"] = bool(fields["emojis"])
+    if "cuts" in fields:
+        cuts = []
+        for pair in list(fields["cuts"])[:500]:
+            a, b = float(pair[0]), float(pair[1])
+            if b > a:
+                cuts.append([round(a, 3), round(b, 3)])
+        fields["cuts"] = sorted(cuts)
     if "start" in fields or "end" in fields:
         s = max(0.0, float(fields.get("start", clip["start"])))
         e = min(float(job["meta"]["duration"]), float(fields.get("end", clip["end"])))
         if e - s < 3:
             raise ValueError("Clips must be at least 3 seconds long.")
-        if e - s > 180:
-            raise ValueError("Clips can be at most 3 minutes long.")
+        if e - s > render.MAX_CLIP_SECONDS:
+            raise ValueError("Clips can be at most 15 minutes long.")
         fields["start"], fields["end"] = round(s, 3), round(e, 3)
         fields["track"] = None  # re-plan the camera path for the new range
         words = json.loads((job_dir(job_id) / "transcript.json").read_text())["words"]

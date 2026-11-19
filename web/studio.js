@@ -3,7 +3,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 
-const state = { cfg: null, src: "file", niche: "general", style: "", lengths: [20, 60], file: null, jobId: null, poll: null, cards: new Map(), job: null };
+const state = { cfg: null, src: "file", niche: "general", aspect: "9:16", brands: [], style: "", lengths: [20, 60], file: null, jobId: null, poll: null, cards: new Map(), job: null };
 
 function toast(msg) {
   const t = $("#toast");
@@ -56,6 +56,21 @@ async function init() {
   });
   selectStyle("bold");
 
+  const aEl = $("#aspects");
+  Object.entries(state.cfg.aspects).forEach(([k, label]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip" + (k === "9:16" ? " on" : ""); b.textContent = k; b.title = label; b.dataset.key = k;
+    b.onclick = () => selectAspect(k);
+    aEl.appendChild(b);
+  });
+  $("#brand").onchange = () => { const b = state.brands.find((x) => x.id === $("#brand").value); if (b) applyBrand(b); };
+  $("#manageBrands").onclick = openBrands;
+  $("#bmClose").onclick = closeBrands;
+  $("#brandModal").onclick = (e) => { if (e.target.id === "brandModal") closeBrands(); };
+  $("#bmNew").onclick = () => editBrand(null);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#brandModal").hidden) closeBrands(); });
+  await loadBrands();
+
   const lay = $("#layout");
   Object.entries(state.cfg.layouts).forEach(([k, label]) => lay.add(new Option(label, k)));
 
@@ -101,6 +116,105 @@ function banners() {
   if (!state.cfg.whisper) {
     b.insertAdjacentHTML("beforeend", `<div class="banner warn">Speech-to-text isn't installed on this server. Upload an .srt or .vtt transcript with your video (More options).</div>`);
   }
+}
+
+function selectAspect(k) {
+  state.aspect = k;
+  $("#aspects").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.key === k));
+}
+
+function applyBrand(b) {
+  $("#accent").value = (b.accent || "#ffe14d").toLowerCase();
+  if (b.style) selectStyle(b.style);
+  if (b.aspect) selectAspect(b.aspect);
+  if (b.position) $("#position").value = b.position;
+  if (b.layout) $("#layout").value = b.layout;
+  $("#watermark").value = b.watermark || "";
+  $("#emojis").checked = !!b.emojis;
+}
+
+// ------------------------------------------------------------------ brand templates
+async function loadBrands() {
+  state.brands = await api("/api/brands");
+  const sel = $("#brand"), keep = sel.value;
+  sel.innerHTML = `<option value="">No template</option>` +
+    state.brands.map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join("");
+  if (state.brands.some((b) => b.id === keep)) sel.value = keep;
+}
+
+function openBrands() { $("#brandModal").hidden = false; $("#bmEdit").innerHTML = ""; drawBrandList(); }
+function closeBrands() { $("#brandModal").hidden = true; }
+
+function drawBrandList() {
+  const el = $("#bmList");
+  if (!state.brands.length) { el.innerHTML = `<div class="small" style="margin-top:12px">No templates yet.</div>`; return; }
+  el.innerHTML = state.brands.map((b) => `
+    <div class="brand-row" data-id="${esc(b.id)}">
+      <div class="sw" style="${b.logo_url ? "" : `background:${esc(b.accent)}`}">${b.logo_url ? `<img src="${esc(b.logo_url)}" alt="">` : ""}</div>
+      <div><b>${esc(b.name)}</b><div class="small">${esc(state.cfg.styles[b.style] || b.style)} · ${esc(b.aspect)}${b.font_family ? " · " + esc(b.font_family) : ""}${b.watermark ? " · " + esc(b.watermark) : ""}</div></div>
+      <div class="actions"><button type="button" class="btn btn-ghost btn-sm" data-act="edit">Edit</button><button type="button" class="btn btn-ghost btn-sm" data-act="del">Delete</button></div>
+    </div>`).join("");
+  el.querySelectorAll(".brand-row").forEach((row) => {
+    const b = state.brands.find((x) => x.id === row.dataset.id);
+    row.querySelector('[data-act="edit"]').onclick = () => editBrand(b);
+    row.querySelector('[data-act="del"]').onclick = async () => {
+      if (!confirm(`Delete the "${b.name}" template?`)) return;
+      await api(`/api/brands/${b.id}`, { method: "DELETE" });
+      await loadBrands(); drawBrandList(); $("#bmEdit").innerHTML = "";
+    };
+  });
+}
+
+function editBrand(b) {
+  const box = $("#bmEdit");
+  const opt = (obj, cur) => Object.entries(obj).map(([k, l]) => `<option value="${esc(k)}" ${k === cur ? "selected" : ""}>${esc(l)}</option>`).join("");
+  box.innerHTML = `
+    <div class="brand-edit">
+      <b>${b ? "Edit template" : "New template"}</b>
+      <input type="text" id="bName" placeholder="Template name, e.g. client or channel" maxlength="60" value="${esc(b?.name || "")}">
+      <div class="row">
+        <input type="color" id="bAccent" value="${esc((b?.accent || "#ffe14d").toLowerCase())}" aria-label="Accent colour">
+        <select id="bStyle" aria-label="Caption style">${opt(state.cfg.styles, b?.style || "bold")}</select>
+        <select id="bAspect" aria-label="Shape">${opt(state.cfg.aspects, b?.aspect || "9:16")}</select>
+      </div>
+      <div class="row">
+        <select id="bPos" aria-label="Caption position">${opt({ lower: "Captions: lower third", middle: "Captions: middle", bottom: "Captions: bottom" }, b?.position || "lower")}</select>
+        <select id="bLayout" aria-label="Framing">${opt(state.cfg.layouts, b?.layout || "auto")}</select>
+      </div>
+      <input type="text" id="bMark" placeholder="@handle watermark (optional)" maxlength="40" value="${esc(b?.watermark || "")}">
+      <label class="toggle">Emojis on captions <input type="checkbox" id="bEmoji" ${b?.emojis ? "checked" : ""}></label>
+      ${b ? `
+      <div class="row">
+        <div><label class="f" style="margin-top:0">Logo (PNG/JPG)</label><input type="file" id="bLogo" accept="image/png,image/jpeg"></div>
+        <div><label class="f" style="margin-top:0">Font (.ttf/.otf)</label><input type="file" id="bFont" accept=".ttf,.otf"></div>
+      </div>
+      <div class="small">${b.logo_url ? `Logo set · <a href="#" id="bLogoX">remove</a>` : "No logo"} &nbsp;·&nbsp; ${b.font_family ? `Font: ${esc(b.font_family)} · <a href="#" id="bFontX">remove</a>` : "Default font (Inter)"}</div>` :
+      `<div class="small">Save first, then add a logo and font.</div>`}
+      <button type="button" class="btn btn-primary btn-sm" id="bSave">${b ? "Save changes" : "Create template"}</button>
+    </div>`;
+  const reloadEdit = async (id) => { await loadBrands(); drawBrandList(); editBrand(state.brands.find((x) => x.id === id)); };
+  $("#bSave").onclick = async () => {
+    const body = { name: $("#bName").value.trim(), accent: $("#bAccent").value, style: $("#bStyle").value,
+      aspect: $("#bAspect").value, position: $("#bPos").value, layout: $("#bLayout").value,
+      watermark: $("#bMark").value.trim(), emojis: $("#bEmoji").checked };
+    if (!body.name) { toast("Give the template a name."); return; }
+    try {
+      const saved = await api(b ? `/api/brands/${b.id}` : "/api/brands", { method: b ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      toast(b ? "Template saved" : "Template created");
+      await reloadEdit(saved.id);
+    } catch (e) { toast(e.message); }
+  };
+  if (!b) return;
+  const upload = async (kind, file) => {
+    const fd = new FormData(); fd.append("file", file);
+    try { await api(`/api/brands/${b.id}/${kind}`, { method: "POST", body: fd }); toast(kind === "logo" ? "Logo uploaded" : "Font uploaded"); await reloadEdit(b.id); }
+    catch (e) { toast(e.message); }
+  };
+  $("#bLogo").onchange = (e) => e.target.files[0] && upload("logo", e.target.files[0]);
+  $("#bFont").onchange = (e) => e.target.files[0] && upload("font", e.target.files[0]);
+  const clear = async (kind, ev) => { ev.preventDefault(); await api(`/api/brands/${b.id}/${kind}`, { method: "DELETE" }); await reloadEdit(b.id); };
+  $("#bLogoX") && ($("#bLogoX").onclick = (ev) => clear("logo", ev));
+  $("#bFontX") && ($("#bFontX").onclick = (ev) => clear("font", ev));
 }
 
 function selectStyle(k) {
@@ -156,6 +270,10 @@ function upload() {
   fd.append("tighten", $("#tighten").checked);
   fd.append("show_hook", $("#showHook").checked);
   fd.append("progress_bar", $("#progressBar").checked);
+  fd.append("aspect", state.aspect);
+  fd.append("emojis", $("#emojis").checked);
+  fd.append("cut_fillers", $("#cutFillers").checked);
+  fd.append("brand_id", $("#brand").value);
 
   const bar = $("#upbar"), go = $("#go"), msg = $("#upmsg");
   bar.style.display = linkMode ? "none" : "block"; go.disabled = true;
@@ -318,19 +436,35 @@ function makeCard(c) {
         <label class="f" style="margin-top:0">Hook headline</label>
         <input type="text" class="e-hook" maxlength="80">
         <div class="row">
-          <select class="e-style"></select>
-          <select class="e-layout"></select>
-          <input type="color" class="e-accent">
+          <select class="e-style" aria-label="Caption style"></select>
+          <select class="e-aspect" aria-label="Shape"></select>
+          <input type="color" class="e-accent" aria-label="Accent colour">
         </div>
-        <div class="trim"><span>Start</span><span class="e-s"></span><button data-d="-1" data-k="start">−1s</button><button data-d="1" data-k="start">+1s</button></div>
-        <div class="trim"><span>End</span><span class="e-e"></span><button data-d="-1" data-k="end">−1s</button><button data-d="1" data-k="end">+1s</button></div>
-        <button class="btn btn-primary btn-sm apply">Re-render clip</button>
-        <div class="small transcript"></div>
+        <div class="row">
+          <select class="e-layout" aria-label="Framing"></select>
+          <label class="toggle" style="flex:0 0 auto;gap:8px">Emojis <input type="checkbox" class="e-emojis"></label>
+        </div>
+        <div class="reframe" hidden>
+          <div class="small" style="margin-bottom:6px">Drag the box to choose what stays in frame.</div>
+          <div class="rf-wrap"><img class="rf-img" alt="Source frame"><div class="rf-box"></div></div>
+        </div>
+        <label class="f">Transcript editor</label>
+        <div class="tmode">
+          <button type="button" class="on" data-m="cut">✂ Cut words</button>
+          <button type="button" data-m="start">⇤ Set start</button>
+          <button type="button" data-m="end">⇥ Set end</button>
+        </div>
+        <div class="words"><div class="small">Loading transcript…</div></div>
+        <div class="small">Click words to remove them (shift-click selects a range). Grey words are outside the clip; use Set start / Set end to include them.</div>
+        <div class="trim"><span>Start</span><span class="e-s"></span><button type="button" data-d="-1" data-k="start">−1s</button><button type="button" data-d="1" data-k="start">+1s</button></div>
+        <div class="trim"><span>End</span><span class="e-e"></span><button type="button" data-d="-1" data-k="end">−1s</button><button type="button" data-d="1" data-k="end">+1s</button></div>
+        <button type="button" class="btn btn-primary btn-sm apply">Re-render clip</button>
       </div>
     </div>`;
-  const card = { el, platform: "tiktok", version: -1, draft: null };
+  const card = { el, platform: "tiktok", version: -1, draft: null, words: [], mode: "cut", lastIdx: null };
   Object.entries(state.cfg.styles).forEach(([k, l]) => $(".e-style", el).add(new Option(l, k)));
   Object.entries(state.cfg.layouts).forEach(([k, l]) => $(".e-layout", el).add(new Option(l, k)));
+  Object.entries(state.cfg.aspects).forEach(([k, l]) => $(".e-aspect", el).add(new Option(l, k)));
   el.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
     card.platform = b.dataset.p;
     el.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
@@ -344,31 +478,36 @@ function makeCard(c) {
     const box = $(".editbox", el);
     const open = !box.classList.contains("open");
     box.classList.toggle("open", open);
-    if (open) {
-      const c = card.clip;
-      card.draft = { start: c.start, end: c.end };
-      $(".e-hook", el).value = c.hook || "";
-      $(".e-style", el).value = c.style;
-      $(".e-layout", el).value = c.layout;
-      $(".e-accent", el).value = (c.accent || "#ffe14d").toLowerCase();
-      showTrim(card);
-    }
+    if (open) openEditor(card);
   };
   el.querySelectorAll(".trim button").forEach((b) => b.onclick = () => {
     const k = b.dataset.k, d = Number(b.dataset.d);
     card.draft[k] = Math.max(0, Math.min(state.job.duration, card.draft[k] + d));
-    showTrim(card);
+    showTrim(card); drawWords(card);
   });
+  el.querySelectorAll(".tmode button").forEach((b) => b.onclick = () => {
+    card.mode = b.dataset.m;
+    el.querySelectorAll(".tmode button").forEach((x) => x.classList.toggle("on", x === b));
+  });
+  $(".e-layout", el).onchange = () => showReframe(card);
+  $(".e-aspect", el).onchange = () => showReframe(card);
+  setupDrag(card);
   $(".apply", el).onclick = async () => {
-    const c = card.clip;
+    const c = card.clip, d = card.draft;
     const body = {
       hook: $(".e-hook", el).value,
       style: $(".e-style", el).value,
       layout: $(".e-layout", el).value,
       accent: $(".e-accent", el).value,
+      aspect: $(".e-aspect", el).value,
+      emojis: $(".e-emojis", el).checked,
+      cuts: cutRanges(card),
     };
-    if (Math.abs(card.draft.start - c.start) > 0.01) body.start = card.draft.start;
-    if (Math.abs(card.draft.end - c.end) > 0.01) body.end = card.draft.end;
+    if (body.layout === "manual") body.crop_x = d.crop_x;
+    if (Math.abs(d.start - c.start) > 0.01) body.start = d.start;
+    if (Math.abs(d.end - c.end) > 0.01) body.end = d.end;
+    if (d.end - d.start < 3) { toast("A clip must be at least 3 seconds."); return; }
+    if (d.end - d.start > state.cfg.max_clip_seconds) { toast("A clip can be at most 15 minutes."); return; }
     try {
       await api(`/api/jobs/${state.jobId}/clips/${c.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       $(".editbox", el).classList.remove("open");
@@ -377,6 +516,121 @@ function makeCard(c) {
     } catch (e) { toast(e.message); }
   };
   return card;
+}
+
+async function openEditor(card) {
+  const c = card.clip, el = card.el;
+  card.draft = { start: c.start, end: c.end, crop_x: c.crop_x ?? 0.5 };
+  $(".e-hook", el).value = c.hook || "";
+  $(".e-style", el).value = c.style;
+  $(".e-layout", el).value = c.layout;
+  $(".e-aspect", el).value = c.aspect || "9:16";
+  $(".e-emojis", el).checked = !!c.emojis;
+  $(".e-accent", el).value = (c.accent || "#ffe14d").toLowerCase();
+  showTrim(card);
+  showReframe(card);
+  try {
+    const data = await api(`/api/jobs/${state.jobId}/clips/${c.id}/words`);
+    card.words = data.words;
+    drawWords(card);
+    const first = $(".words .w:not(.out)", el);
+    if (first) $(".words", el).scrollTop = Math.max(0, first.offsetTop - $(".words", el).offsetTop - 30);
+  } catch (e) { $(".words", el).innerHTML = `<div class="small">${esc(e.message)}</div>`; }
+}
+
+function drawWords(card) {
+  const box = $(".words", card.el), d = card.draft;
+  box.innerHTML = "";
+  card.words.forEach((w, i) => {
+    const sp = document.createElement("span");
+    const inside = w.s >= d.start - 0.05 && w.s < d.end;
+    sp.className = "w" + (inside ? "" : " out") + (w.cut ? " cut" : "");
+    sp.textContent = w.w;
+    sp.title = fmt(w.s) + `.${Math.floor((w.s % 1) * 10)}`;
+    sp.onclick = (ev) => clickWord(card, i, ev.shiftKey);
+    box.appendChild(sp);
+    box.appendChild(document.createTextNode(" "));
+  });
+}
+
+function clickWord(card, i, shift) {
+  const w = card.words[i], d = card.draft;
+  if (card.mode === "start") {
+    if (w.s >= d.end - 3) { toast("Start must be before the end."); return; }
+    d.start = Math.max(0, w.s - 0.05);
+  } else if (card.mode === "end") {
+    if (w.e <= d.start + 3) { toast("End must be after the start."); return; }
+    d.end = Math.min(state.job.duration, w.e + 0.15);
+  } else {
+    const target = !w.cut;
+    const [a, b] = shift && card.lastIdx !== null ? [Math.min(card.lastIdx, i), Math.max(card.lastIdx, i)] : [i, i];
+    for (let k = a; k <= b; k++) card.words[k].cut = target;
+    card.lastIdx = i;
+  }
+  showTrim(card); drawWords(card);
+}
+
+function cutRanges(card) {
+  // merge consecutive cut words into [start, end] ranges (source time)
+  const out = [];
+  let cur = null;
+  card.words.forEach((w) => {
+    if (w.cut) {
+      if (cur) cur[1] = w.e; else cur = [w.s, w.e];
+    } else if (cur) { out.push(cur); cur = null; }
+  });
+  if (cur) out.push(cur);
+  return out;
+}
+
+function cropFraction(aspect) {
+  const [aw, ah] = aspect.split(":").map(Number);
+  const m = state.job.meta || {};
+  if (!m.width || !m.height) return 1;
+  return Math.min(1, (aw / ah) / (m.width / m.height));
+}
+
+function showReframe(card) {
+  const el = card.el, box = $(".reframe", el);
+  const manual = $(".e-layout", el).value === "manual";
+  const frac = cropFraction($(".e-aspect", el).value);
+  box.hidden = !manual;
+  if (!manual) return;
+  if (frac > 0.98) {
+    box.querySelector(".small").textContent = "This shape already shows the full width of the video, so there's nothing to reposition.";
+    $(".rf-wrap", el).hidden = true;
+    return;
+  }
+  box.querySelector(".small").textContent = "Drag the box to choose what stays in frame.";
+  $(".rf-wrap", el).hidden = false;
+  const img = $(".rf-img", el);
+  const src = `/api/jobs/${state.jobId}/clips/${card.clip.id}/frame?s=${card.clip.start}`;
+  if (img.dataset.src !== src) { img.src = src; img.dataset.src = src; }
+  placeBox(card);
+}
+
+function placeBox(card) {
+  const el = card.el, frac = cropFraction($(".e-aspect", el).value);
+  const cx = Math.min(1 - frac / 2, Math.max(frac / 2, card.draft.crop_x));
+  card.draft.crop_x = cx;
+  const b = $(".rf-box", el);
+  b.style.width = frac * 100 + "%";
+  b.style.left = (cx - frac / 2) * 100 + "%";
+}
+
+function setupDrag(card) {
+  const el = card.el, wrap = $(".rf-wrap", el), b = $(".rf-box", el);
+  let dragging = false;
+  const move = (ev) => {
+    if (!dragging) return;
+    const r = wrap.getBoundingClientRect();
+    card.draft.crop_x = (ev.clientX - r.left) / r.width;
+    placeBox(card);
+  };
+  b.addEventListener("pointerdown", (ev) => { dragging = true; b.setPointerCapture(ev.pointerId); ev.preventDefault(); });
+  b.addEventListener("pointermove", move);
+  b.addEventListener("pointerup", () => { dragging = false; });
+  wrap.addEventListener("click", (ev) => { if (ev.target === wrap || ev.target.classList.contains("rf-img")) { dragging = true; move(ev); dragging = false; } });
 }
 
 function showTrim(card) {
@@ -388,6 +642,8 @@ function showTrim(card) {
 function updateCard(card, c) {
   card.clip = c;
   const el = card.el, base = `/api/jobs/${state.jobId}/clips/${c.id}`;
+  const [aw, ah] = (c.aspect || "9:16").split(":").map(Number);
+  $(".vid", el).style.aspectRatio = `${aw} / ${ah}`;
   $(".rank", el).textContent = `#${c.rank} · ${c.duration ? c.duration.toFixed(0) : (c.end - c.start).toFixed(0)}s`;
   const ring = $(".ring", el);
   ring.style.setProperty("--v", c.virality);
@@ -399,7 +655,6 @@ function updateCard(card, c) {
   $(".bars", el).innerHTML = [["Hook", s.hook], ["Flow", s.flow], ["Value", s.value], ["Trend", s.trend]]
     .map(([l, v]) => `<div>${l} ${v ?? "–"}<i><b style="width:${Number(v) || 0}%"></b></i></div>`).join("");
   $(".captext", el).textContent = c.captions?.[card.platform] || "";
-  $(".transcript", el).textContent = `“${c.transcript || ""}”`;
 
   const ov = $(".overlay", el), video = $("video", el);
   const ready = c.status === "ready";

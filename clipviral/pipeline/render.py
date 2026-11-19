@@ -1,14 +1,33 @@
-"""Single-pass ffmpeg render of one vertical clip."""
+"""Single-pass ffmpeg render of one clip (any aspect ratio)."""
 from __future__ import annotations
 
+import os
+import re
+import subprocess
 from pathlib import Path
 
 from .. import config
-from .captions import build_ass, build_srt
+from .captions import _FILLER, build_ass, build_srt, caption_margin
 from .media import snapshot
-from .reframe import crop_x_expr, plan_path, track_faces
+from .reframe import crop_x_expr, plan_path, track_subject
+
+ASSETS = Path(__file__).resolve().parent.parent / "assets"
+
+# Output shapes: name -> (width, height)
+ASPECTS: dict[str, tuple[int, int]] = {
+    "9:16": (1080, 1920),   # TikTok, Reels, Shorts
+    "1:1": (1080, 1080),    # feed posts
+    "4:5": (1080, 1350),    # Instagram / Facebook feed
+    "16:9": (1920, 1080),   # YouTube, X, LinkedIn
+}
+MAX_CLIP_SECONDS = 15 * 60
 
 
+def output_size(aspect: str | None) -> tuple[int, int]:
+    return ASPECTS.get(aspect or "9:16", ASPECTS["9:16"])
+
+
+# --------------------------------------------------------------------------- timeline helpers
 def keep_intervals(words: list[dict], duration: float, max_gap: float = 0.55,
                    pad: float = 0.12) -> list[tuple[float, float]]:
     """Segments of the clip to keep when tightening dead air (clip-relative)."""
@@ -26,6 +45,32 @@ def keep_intervals(words: list[dict], duration: float, max_gap: float = 0.55,
     cur[1] = duration
     spans.append(cur)
     return [(round(a, 3), round(b, 3)) for a, b in spans if b - a > 0.05]
+
+
+def subtract(keep: list[tuple[float, float]], removed: list[tuple[float, float]],
+             min_len: float = 0.05) -> list[tuple[float, float]]:
+    """keep minus removed (both lists of [start, end) intervals)."""
+    out = []
+    for a, b in keep:
+        segs = [(a, b)]
+        for ra, rb in removed:
+            nxt = []
+            for s, e in segs:
+                if rb <= s or ra >= e:
+                    nxt.append((s, e))
+                    continue
+                if ra > s:
+                    nxt.append((s, ra))
+                if rb < e:
+                    nxt.append((rb, e))
+            segs = nxt
+        out.extend((round(s, 3), round(e, 3)) for s, e in segs if e - s >= min_len)
+    return out
+
+
+def filler_spans(words: list[dict]) -> list[tuple[float, float]]:
+    """Time ranges of filler words ("um", "uh"...) to cut from audio and video."""
+    return [(max(0.0, w["s"] - 0.02), w["e"] + 0.04) for w in words if _FILLER.match(w["w"])]
 
 
 def remap(words: list[dict], keep: list[tuple[float, float]]) -> list[dict]:
@@ -54,6 +99,11 @@ def clip_words(all_words: list[dict], start: float, end: float) -> list[dict]:
             for w in all_words if w["s"] >= start - 0.05 and w["s"] < end]
 
 
+def _even(x: float) -> int:
+    return max(2, int(round(x / 2)) * 2)
+
+
+# --------------------------------------------------------------------------- render
 def render_clip(job_dir: Path, src: Path, meta: dict, clip: dict, words: list[dict],
                 opts: dict) -> dict:
     """Render clip -> mp4 + jpg + srt + ass. Returns updated file info."""
@@ -61,67 +111,134 @@ def render_clip(job_dir: Path, src: Path, meta: dict, clip: dict, words: list[di
     start, end = float(clip["start"]), float(clip["end"])
     dur = end - start
     cw = clip_words(words, start, end)
+    W, H = output_size(clip.get("aspect") or opts.get("aspect"))
+    fps = config.FPS
 
-    layout = opts.get("layout", "auto")
+    # ---------------------------------------------------------------- framing
+    layout = clip.get("layout") or opts.get("layout", "auto")
     src_w, src_h = meta["width"], meta["height"]
-    vertical_src = src_w / src_h < 0.7
+    target = W / H
+    src_ratio = src_w / src_h
+    crop_w, crop_h = src_w, src_h
+    if src_ratio > target * 1.01:
+        crop_w = min(src_w, _even(src_h * target))
+    elif src_ratio < target / 1.01:
+        crop_h = min(src_h, _even(src_w / target))
+    needs_pan = crop_w < src_w
     keys = None
-    used_layout = layout
-    crop_w = int(round(src_h * 9 / 16 / 2) * 2)
-    if vertical_src:
-        used_layout = "fill"
+    used = layout
+    if layout == "fit":
+        used = "fit"
+    elif not needs_pan:
+        # source is the same shape or taller than the output: crop height (upper-middle keeps heads)
+        used = "fill" if crop_h < src_h else "scale"
+    elif layout == "manual":
+        used = "manual"
     elif layout in ("auto", "smart"):
         if clip.get("track") is None:
-            samples = track_faces(src, start, end)
-            clip["track"] = plan_path(samples, dur, crop_w / src_w)
+            clip["track"] = plan_path(track_subject(src, start, end), dur, crop_w / src_w)
         keys = clip["track"]
-        used_layout = "smart" if keys else ("fit" if layout == "auto" else "center")
-    elif layout == "center":
-        used_layout = "center"
+        used = "smart" if keys else ("fit" if layout == "auto" else "center")
+    else:
+        used = "center"
 
-    # --- video chain
-    if used_layout == "smart":
+    scale = f"scale={W}:{H}:flags=lanczos,setsar=1,fps={fps}"
+    if used == "smart":
         x = crop_x_expr([tuple(k) for k in keys], src_w, crop_w)
-        vchain = (f"[0:v]crop=w={crop_w}:h={src_h}:x='{x}':y=0,"
-                  f"scale={config.OUT_W}:{config.OUT_H}:flags=lanczos,setsar=1,fps={config.FPS}[v0]")
-    elif used_layout == "center":
-        vchain = (f"[0:v]crop=w={crop_w}:h={src_h}:x=(iw-{crop_w})/2:y=0,"
-                  f"scale={config.OUT_W}:{config.OUT_H}:flags=lanczos,setsar=1,fps={config.FPS}[v0]")
-    elif used_layout == "fill":
-        vchain = (f"[0:v]scale={config.OUT_W}:{config.OUT_H}:force_original_aspect_ratio=increase,"
-                  f"crop={config.OUT_W}:{config.OUT_H},setsar=1,fps={config.FPS}[v0]")
-    else:  # fit: full frame over blurred, zoomed copy of itself
+        vchain = f"[0:v]crop=w={crop_w}:h={src_h}:x='{x}':y=0,{scale}[v0]"
+    elif used == "manual":
+        cx = min(1.0, max(0.0, float(clip.get("crop_x", 0.5))))
+        x = max(0, min(src_w - crop_w, int(cx * src_w - crop_w / 2)))
+        vchain = f"[0:v]crop=w={crop_w}:h={src_h}:x={x}:y=0,{scale}[v0]"
+    elif used == "center":
+        vchain = f"[0:v]crop=w={crop_w}:h={src_h}:x=(iw-{crop_w})/2:y=0,{scale}[v0]"
+    elif used == "fill":
+        vchain = f"[0:v]crop=w={src_w}:h={crop_h}:x=0:y=(ih-{crop_h})*0.35,{scale}[v0]"
+    elif used == "scale":
+        vchain = f"[0:v]{scale}[v0]"
+    else:  # fit: full frame over a blurred, zoomed copy of itself
+        bw, bh = _even(W / 4), _even(H / 4)
+        lift = int(H * 0.06) if H > W else 0
         vchain = (f"[0:v]split[a][b];"
-                  f"[a]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=10:2,"
-                  f"eq=brightness=-0.10:saturation=1.2,scale={config.OUT_W}:{config.OUT_H}[bg];"
-                  f"[b]scale={config.OUT_W}:-2:flags=lanczos[fg];"
-                  f"[bg][fg]overlay=(W-w)/2:(H-h)/2-{int(config.OUT_H * 0.06)},setsar=1,fps={config.FPS}[v0]")
+                  f"[a]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},boxblur=10:2,"
+                  f"eq=brightness=-0.10:saturation=1.2,scale={W}:{H}[bg];"
+                  f"[b]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
+                  f"[bg][fg]overlay=(W-w)/2:(H-h)/2-{lift},setsar=1,fps={fps}[v0]")
 
+    # ---------------------------------------------------------------- timeline edits
     keep = keep_intervals(cw, dur) if opts.get("tighten", True) else [(0.0, dur)]
-    tightened = len(keep) > 1
-    if tightened:
+    removed: list[tuple[float, float]] = []
+    if opts.get("cut_fillers", True):
+        removed += filler_spans(cw)
+    for a, b in clip.get("cuts") or []:  # text-based edits, stored in source time
+        ra, rb = max(0.0, float(a) - start), min(dur, float(b) - start)
+        if rb > ra:
+            removed.append((ra, rb))
+    if removed:
+        keep = subtract(keep, sorted(removed))
+    if not keep:
+        raise RuntimeError("Every part of this clip was cut. Restore some words and try again.")
+    edited = keep != [(0.0, round(dur, 3))]
+    if edited:
         sel = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in keep)
-        vchain += f";[v0]select='{sel}',setpts=N/({config.FPS}*TB)[v1]"
+        vchain += f";[v0]select='{sel}',setpts=N/({fps}*TB)[v1]"
         out_words = remap(cw, keep)
         out_dur = sum(b - a for a, b in keep)
     else:
         vchain += ";[v0]null[v1]"
         out_words, out_dur = cw, dur
 
+    # ---------------------------------------------------------------- captions + overlays
     ass = job_dir / f"{cid}.ass"
-    build_ass(out_words, out_dur, ass, style=opts.get("style", "bold"),
-              accent=opts.get("accent", "#FFE14D"), position=opts.get("position", "lower"),
-              hook=clip.get("hook", "") if opts.get("show_hook", True) else "",
-              emphasis=clip.get("emphasis"), progress_bar=opts.get("progress_bar", True),
-              watermark=opts.get("watermark", ""))
+    position = clip.get("position") or opts.get("position", "lower")
+    emoji_events = build_ass(
+        out_words, out_dur, ass, style=clip.get("style") or opts.get("style", "bold"),
+        accent=clip.get("accent") or opts.get("accent", "#FFE14D"), position=position,
+        hook=clip.get("hook", "") if opts.get("show_hook", True) else "",
+        emphasis=clip.get("emphasis"), progress_bar=opts.get("progress_bar", True),
+        watermark=opts.get("watermark", ""), size=(W, H), font=opts.get("font", ""),
+        emojis=bool(clip.get("emojis", opts.get("emojis", False))))
     build_srt(out_words, job_dir / f"{cid}.srt")
-    vchain += f";[v1]ass={ass.name}[vout]"
+
+    ass_opts = ass.name
+    fontsdir = opts.get("fontsdir")
+    if fontsdir and Path(fontsdir).is_dir():
+        rel = os.path.relpath(fontsdir, job_dir).replace("\\", "/")
+        if re.fullmatch(r"[\w./-]+", rel):
+            ass_opts += f":fontsdir={rel}"
+    vchain += f";[v1]ass={ass_opts}[v2]"
+
+    inputs: list[str] = []
+    last = "v2"
+    n_in = 1
+    # colour emoji pop-ups above the captions
+    size = int(min(W, H) * 0.13)
+    ey = max(10, H - caption_margin(position, H) - int(min(W, H) * 0.11) - size)
+    for i, (a, b, code) in enumerate(emoji_events):
+        png = ASSETS / "emoji" / f"{code}.png"
+        if not png.exists():
+            continue
+        inputs += ["-i", str(png)]
+        vchain += (f";[{n_in}:v]scale={size}:{size},format=rgba[e{i}];"
+                   f"[{last}][e{i}]overlay=x=(W-w)/2:y={ey}:enable='between(t,{a:.3f},{b:.3f})'[o{i}]")
+        last = f"o{i}"
+        n_in += 1
+    # brand logo (top-left; text watermark sits top-right)
+    logo = opts.get("logo")
+    if logo and Path(logo).exists():
+        lw = _even(W * 0.16)
+        inputs += ["-i", str(logo)]
+        vchain += (f";[{n_in}:v]scale={lw}:-2,format=rgba,colorchannelmixer=aa=0.92[logo];"
+                   f"[{last}][logo]overlay=x=44:y=44[olog]")
+        last = "olog"
+        n_in += 1
+    vchain += f";[{last}]null[vout]"
 
     graph = vchain
     maps = ["-map", "[vout]"]
     if meta.get("has_audio"):
         achain = "[0:a]"
-        if tightened:
+        if edited:
             asel = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in keep)
             achain += f"aselect='{asel}',asetpts=N/SR/TB,"
         achain += "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[aout]"
@@ -133,15 +250,15 @@ def render_clip(job_dir: Path, src: Path, meta: dict, clip: dict, words: list[di
     script = job_dir / f"{cid}.filter"
     script.write_text(graph, encoding="utf-8")
     cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
-           "-filter_complex_script", script.name, *maps,
+           *inputs, "-filter_complex_script", script.name, *maps,
            "-c:v", "libx264", "-preset", config.X264_PRESET, "-crf", config.X264_CRF,
            "-pix_fmt", "yuv420p", "-profile:v", "high", "-movflags", "+faststart",
            "-t", f"{out_dur:.3f}", str(tmp.name)]
-    import subprocess
     proc = subprocess.run(cmd, cwd=job_dir, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError("ffmpeg render failed: " + "\n".join(proc.stderr.splitlines()[-12:]))
     tmp.replace(out)
     snapshot(out, min(1.2, out_dur / 2), job_dir / f"{cid}.jpg", width=360)
-    return {"layout_used": used_layout, "duration": round(out_dur, 2),
-            "source_duration": round(dur, 2), "tightened_by": round(dur - out_dur, 2)}
+    return {"layout_used": used, "duration": round(out_dur, 2), "size": [W, H],
+            "source_duration": round(dur, 2), "tightened_by": round(dur - out_dur, 2),
+            "emoji_count": len(emoji_events)}

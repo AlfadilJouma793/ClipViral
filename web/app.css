@@ -222,7 +222,7 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 14px; ma
 
 .clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
 .clip { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
-.clip .vid { position: relative; aspect-ratio: 9/16; background: #000; max-height: 560px; }
+.clip .vid { position: relative; aspect-ratio: 9/16; background: #000; max-height: 560px; overflow: hidden; }
 .clip video, .clip .vid img { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .clip .rank { position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,.65); padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 700; }
 .ring { position: absolute; top: 10px; right: 10px; width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center;
@@ -271,3 +271,32 @@ input[type=url] { width: 100%; background: var(--bg-2); border: 1px solid var(--
 input[type=url]:focus { border-color: var(--amber); }
 .source-link { font-size: 12px; color: var(--dim); word-break: break-all; }
 .source-link a { color: var(--muted); }
+
+/* clip editor */
+.tmode { display: flex; gap: 4px; flex-wrap: wrap; }
+.tmode button { border: 1px solid var(--line); background: var(--card-2); color: var(--muted); border-radius: 8px; padding: 6px 10px;
+  font-size: 12px; cursor: pointer; }
+.tmode button.on { background: var(--amber); color: #17130a; border-color: var(--amber); font-weight: 600; }
+.words { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; max-height: 220px; overflow: auto;
+  line-height: 1.9; font-size: 14px; user-select: none; }
+.words .w { cursor: pointer; padding: 1px 2px; border-radius: 4px; }
+.words .w:hover { background: rgba(255,200,61,.18); }
+.words .w.out { color: var(--dim); }
+.words .w.cut { text-decoration: line-through; color: var(--coral); background: rgba(255,107,74,.1); }
+.rf-wrap { position: relative; border-radius: 10px; overflow: hidden; cursor: crosshair; background: #000; }
+.rf-wrap img { width: 100%; display: block; opacity: .55; }
+.rf-box { position: absolute; top: 0; bottom: 0; border: 3px solid var(--amber); border-radius: 6px; cursor: grab; touch-action: none;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.35); background: rgba(255,200,61,.06); }
+.rf-box:active { cursor: grabbing; }
+
+/* brand manager */
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 40; display: grid; place-items: center; padding: 16px; }
+.modal { width: min(720px, 100%); max-height: 90vh; overflow: auto; background: var(--card); border: 1px solid var(--line);
+  border-radius: 18px; padding: 22px; }
+.modal h2 { margin: 0 0 6px; }
+.brand-row { display: grid; grid-template-columns: 52px 1fr auto; gap: 12px; align-items: center; padding: 12px; border: 1px solid var(--line);
+  border-radius: 12px; margin-top: 10px; }
+.brand-row .sw { width: 52px; height: 52px; border-radius: 10px; display: grid; place-items: center; overflow: hidden; background: var(--bg-2); }
+.brand-row .sw img { max-width: 100%; max-height: 100%; }
+.brand-edit { display: grid; gap: 10px; margin-top: 12px; padding: 14px; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--line); }
+.brand-edit .row > * { min-width: 0; }
