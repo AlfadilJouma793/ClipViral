@@ -11,6 +11,7 @@ import re
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
@@ -64,7 +65,7 @@ def get_config():
 @app.post("/api/jobs")
 async def create_job(
     file: UploadFile = File(...),
-    transcript: UploadFile | None = File(None),
+    transcript: Optional[UploadFile] = File(None),
     niche: str = Form("general"),
     num_clips: int = Form(8),
     min_len: float = Form(15),
@@ -147,14 +148,14 @@ def delete_job(job_id: str):
 
 
 class ClipEdit(BaseModel):
-    hook: str | None = None
-    title: str | None = None
-    style: str | None = None
-    layout: str | None = None
-    accent: str | None = None
-    position: str | None = None
-    start: float | None = None
-    end: float | None = None
+    hook: Optional[str] = None
+    title: Optional[str] = None
+    style: Optional[str] = None
+    layout: Optional[str] = None
+    accent: Optional[str] = None
+    position: Optional[str] = None
+    start: Optional[float] = None
+    end: Optional[float] = None
 
 
 @app.patch("/api/jobs/{job_id}/clips/{clip_id}")

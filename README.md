@@ -23,6 +23,19 @@ Upload → transcribe every word → find the best moments → reframe to 9:16 a
 
 ## Run locally
 
+### Mac: one click
+
+1. Download the project (green **Code** button on GitHub, then **Download ZIP**) and unzip it.
+2. In Finder, right-click **`start-mac.command`**, choose **Open**, then **Open** again. (macOS asks this the first time because the file was downloaded.)
+3. Wait. The first run installs Homebrew, Python 3.12, ffmpeg and the app's packages, which takes 5–15 minutes. It asks once for an optional Anthropic API key.
+4. Your browser opens the studio at http://localhost:8000/studio. Close the Terminal window to stop the app.
+
+Next time, just double-click `start-mac.command`. It starts in a few seconds.
+
+### Manual setup
+
+The app needs Python 3.10–3.12. On macOS, use Homebrew's `python@3.12`, not the system Python.
+
 Requirements: Python 3.11+, `ffmpeg` with libass (standard on most distros), and the Inter font for the best-looking captions (`apt install fonts-inter`).
 
 ```bash

@@ -6,4 +6,5 @@ anthropic>=2.10
 numpy>=1.26
 faster-whisper>=1.1
 opencv-python-headless>=4.9,<5
-dlib-bin>=19.24
+# Face detector. No macOS wheel for Python 3.13+; the app falls back to OpenCV there.
+dlib-bin>=19.24; sys_platform == "linux" or python_version < "3.13"
