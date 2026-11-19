@@ -34,6 +34,23 @@ Why do so many offers fall through? The chain is the real problem.
 
 
 @pytest.fixture
+def authed(monkeypatch, tmp_path):
+    """A TestClient logged in as a fresh user, with isolated jobs/brands/DB."""
+    from fastapi.testclient import TestClient
+    from clipviral import accounts, brands, main
+    monkeypatch.setattr(config, "JOBS_DIR", tmp_path / "jobs")
+    (tmp_path / "jobs").mkdir()
+    monkeypatch.setattr(brands, "BRANDS_DIR", tmp_path / "brands")
+    monkeypatch.setattr(accounts, "DB_PATH", tmp_path / "test.db")
+    accounts.init()
+    accounts._fails.clear()
+    c = TestClient(main.app)
+    r = c.post("/api/auth/signup", json={"email": "owner@example.com", "password": "correct horse", "name": "Owner"})
+    assert r.status_code == 200, r.text
+    return c
+
+
+@pytest.fixture
 def words():
     return transcribe.parse_subtitles(SRT)["words"]
 
@@ -207,13 +224,11 @@ def test_download_from_link_end_to_end(tmp_path, monkeypatch):
         httpd.shutdown()
 
 
-def test_api_link_job_requires_rights_and_valid_link(monkeypatch, tmp_path):
-    from fastapi.testclient import TestClient
+def test_api_link_job_requires_rights_and_valid_link(monkeypatch, authed):
     from clipviral import jobs, main
-    monkeypatch.setattr(config, "JOBS_DIR", tmp_path)
     monkeypatch.setattr(jobs, "enqueue", lambda *a, **k: None)
     monkeypatch.delenv("CLIPVIRAL_ALLOW_PRIVATE_URLS", raising=False)
-    c = TestClient(main.app)
+    c = authed
     r = c.post("/api/jobs", data={"url": "https://example.com/v.mp4"})
     assert r.status_code == 400 and "permission" in r.json()["detail"]
     r = c.post("/api/jobs", data={"url": "http://127.0.0.1/v.mp4", "rights": "true"})
@@ -334,16 +349,15 @@ def test_motion_tracking_follows_moving_subject(tmp_path):
     assert keys and keys[-1][1] > keys[0][1]
 
 
-def test_api_brands_words_and_clip_edits(monkeypatch, tmp_path):
+def test_api_brands_words_and_clip_edits(monkeypatch, authed):
     import json as _j
-    from fastapi.testclient import TestClient
-    from clipviral import brands, jobs, main
-    monkeypatch.setattr(config, "JOBS_DIR", tmp_path / "jobs")
-    (tmp_path / "jobs").mkdir()
-    monkeypatch.setattr(brands, "BRANDS_DIR", tmp_path / "brands")
+    from clipviral import jobs
     queued = []
     monkeypatch.setattr(jobs, "enqueue", lambda *a, **k: queued.append(a))
-    c = TestClient(main.app)
+    c = authed
+    ws_id = c.get("/api/me").json()["workspace"]["id"]
+    from clipviral import accounts
+    accounts.set_plan(ws_id, "pro")  # validation checks below need more than one brand slot
 
     # brands
     r = c.post("/api/brands", json={"name": "Client", "accent": "#112233", "aspect": "4:5", "emojis": True})
@@ -362,7 +376,7 @@ def test_api_brands_words_and_clip_edits(monkeypatch, tmp_path):
     assert [b["name"] for b in c.get("/api/brands").json()] == ["Client"]
 
     # a finished job with one clip
-    job = jobs.create("demo", {"niche": "general", "aspect": "4:5", "brand_id": bid})
+    job = jobs.create("demo", {"niche": "general", "aspect": "4:5", "brand_id": bid}, workspace_id=ws_id)
     assert job["options"]["aspect"] == "4:5" and job["options"]["brand_id"] == bid
     words = transcribe.parse_subtitles(SRT)["words"]
     d = jobs.job_dir(job["id"])

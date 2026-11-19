@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Log in · ClipViral</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<style>
+  .auth { min-height: calc(100vh - 66px); display: grid; place-items: center; padding: 30px 16px; }
+  .auth .panel { width: min(420px, 100%); padding: 28px; }
+  .auth h1 { font-size: 30px; margin: 0 0 6px; }
+  .auth .sub { color: var(--muted); margin: 0 0 18px; }
+  .auth input { margin-bottom: 10px; }
+  .auth .err { color: var(--coral); font-size: 14px; min-height: 20px; margin: 6px 0; }
+  .auth .switch { text-align: center; margin-top: 16px; font-size: 14px; color: var(--muted); }
+  .auth .switch a { color: var(--amber); cursor: pointer; }
+  .invite-note { background: rgba(255,200,61,.1); border: 1px solid rgba(255,200,61,.3); border-radius: 12px; padding: 10px 12px;
+    font-size: 14px; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+<nav class="nav"><div class="wrap"><a class="logo" href="/"><img src="/static/logo.svg" alt="" width="30" height="30">ClipViral</a></div></nav>
+<main class="auth">
+  <form class="panel" id="form" novalidate>
+    <h1 id="title">Create your account</h1>
+    <p class="sub" id="sub">Start free: 60 minutes of video every month.</p>
+    <div class="invite-note" id="inviteNote" hidden></div>
+    <div id="nameRow"><input type="text" id="name" placeholder="Your name" autocomplete="name" maxlength="80"></div>
+    <input type="email" id="email" placeholder="Email" autocomplete="email" required>
+    <input type="password" id="password" placeholder="Password (8+ characters)" autocomplete="new-password" required minlength="8">
+    <div class="err" id="err" role="alert"></div>
+    <button class="btn btn-primary" style="width:100%" id="go">Create account</button>
+    <div class="switch" id="switch"></div>
+  </form>
+</main>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const params = new URLSearchParams(location.search);
+const invite = params.get("invite");
+const plan = params.get("plan");
+let mode = params.get("mode") === "login" ? "login" : "signup";
+
+function draw() {
+  const signup = mode === "signup";
+  $("#title").textContent = signup ? "Create your account" : "Welcome back";
+  $("#sub").textContent = signup ? "Start free: 60 minutes of video every month." : "Log in to your studio.";
+  $("#nameRow").hidden = !signup;
+  $("#password").autocomplete = signup ? "new-password" : "current-password";
+  $("#go").textContent = signup ? "Create account" : "Log in";
+  $("#switch").innerHTML = signup ? 'Already have an account? <a id="sw">Log in</a>' : 'New to ClipViral? <a id="sw">Create an account</a>';
+  $("#sw").onclick = () => { mode = signup ? "login" : "signup"; $("#err").textContent = ""; draw(); };
+}
+
+async function afterAuth() {
+  if (invite && mode === "login") {
+    const r = await fetch(`/api/invites/${encodeURIComponent(invite)}/accept`, { method: "POST" });
+    if (!r.ok) { $("#err").textContent = (await r.json()).detail || "Couldn't accept the invite."; return; }
+  }
+  if (plan && plan !== "free") {
+    const r = await fetch("/api/billing/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan }) });
+    if (r.ok) { location.href = (await r.json()).url; return; }
+  }
+  location.href = "/studio";
+}
+
+$("#form").onsubmit = async (e) => {
+  e.preventDefault();
+  $("#err").textContent = "";
+  const body = { email: $("#email").value.trim(), password: $("#password").value };
+  if (mode === "signup") { body.name = $("#name").value.trim(); if (invite) body.invite = invite; }
+  $("#go").disabled = true;
+  try {
+    const r = await fetch(`/api/auth/${mode}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) { $("#err").textContent = (await r.json()).detail || "Something went wrong."; return; }
+    await afterAuth();
+  } catch { $("#err").textContent = "Network error. Try again."; }
+  finally { $("#go").disabled = false; }
+};
+
+(async () => {
+  if (invite) {
+    const r = await fetch(`/api/invites/${encodeURIComponent(invite)}`);
+    const note = $("#inviteNote");
+    note.hidden = false;
+    if (r.ok) {
+      const info = await r.json();
+      note.textContent = `You've been invited to join "${info.workspace}". Create an account or log in with ${info.email} to accept.`;
+      if (info.email) $("#email").value = info.email;
+    } else {
+      note.textContent = "This invite link is invalid or was already used.";
+    }
+  }
+  const me = await fetch("/api/me");
+  if (me.ok) {  // already logged in: accept the invite / start checkout straight away
+    mode = "login";
+    await afterAuth();
+    if (!$("#err").textContent) return;
+  }
+  draw();
+})();
+</script>
+</body>
+</html>

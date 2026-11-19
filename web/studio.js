@@ -15,6 +15,7 @@ function toast(msg) {
 
 async function api(path, opts = {}) {
   const r = await fetch(path, opts);
+  if (r.status === 401) { location.href = "/login?mode=login"; throw new Error("Please log in."); }
   if (!r.ok) {
     let msg = r.statusText;
     try { msg = (await r.json()).detail || msg; } catch {}
@@ -25,7 +26,22 @@ async function api(path, opts = {}) {
 
 // ------------------------------------------------------------------ setup form
 async function init() {
+  state.me = await api("/api/me");
   state.cfg = await api("/api/config");
+  drawAccount();
+  $("#logout").onclick = async () => { await fetch("/api/auth/logout", { method: "POST" }); location.href = "/"; };
+  $("#openSettings").onclick = () => openSettings("plan");
+  $("#usagePill").onclick = () => openSettings("plan");
+  $("#stClose").onclick = closeSettings;
+  $("#settingsModal").onclick = (e) => { if (e.target.id === "settingsModal") closeSettings(); };
+  document.querySelectorAll("#settingsModal .seg button").forEach((b) => b.onclick = () => openSettings(b.dataset.tab));
+  $("#wsSwitch").onchange = async () => {
+    await api(`/api/workspaces/${$("#wsSwitch").value}/switch`, { method: "POST" });
+    location.href = "/studio";
+  };
+  const qp = new URLSearchParams(location.search);
+  if (qp.get("billing") === "success") toast("Thanks! Your plan will update in a few seconds.");
+  if (qp.get("billing")) history.replaceState(null, "", "/studio" + location.hash);
   $("#maxgb").textContent = state.cfg.max_upload_gb;
   $("#maxmin").textContent = state.cfg.max_video_minutes;
 
@@ -68,7 +84,11 @@ async function init() {
   $("#bmClose").onclick = closeBrands;
   $("#brandModal").onclick = (e) => { if (e.target.id === "brandModal") closeBrands(); };
   $("#bmNew").onclick = () => editBrand(null);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#brandModal").hidden) closeBrands(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!$("#brandModal").hidden) closeBrands();
+    if (!$("#settingsModal").hidden) closeSettings();
+  });
   await loadBrands();
   if (!state.cfg.broll) { $("#broll").disabled = true; $("#brollNote").hidden = false; }
 
@@ -90,7 +110,7 @@ async function init() {
   drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); setFile(e.dataTransfer.files[0]); };
   $("#newForm").onsubmit = (e) => { e.preventDefault(); upload(); };
 
-  document.querySelectorAll(".seg button").forEach((b) => b.onclick = () => setSource(b.dataset.src));
+  document.querySelectorAll("#newForm .seg button").forEach((b) => b.onclick = () => setSource(b.dataset.src));
   $("#url").oninput = updateGo;
   $("#rights").onchange = updateGo;
   if (!state.cfg.links) $('.seg [data-src="link"]').title = "Link import isn't installed on this server";
@@ -117,6 +137,145 @@ function banners() {
   if (!state.cfg.whisper) {
     b.insertAdjacentHTML("beforeend", `<div class="banner warn">Speech-to-text isn't installed on this server. Upload an .srt or .vtt transcript with your video (More options).</div>`);
   }
+}
+
+// ------------------------------------------------------------------ account & settings
+function drawAccount() {
+  const m = state.me, u = m.usage;
+  const pill = $("#usagePill");
+  pill.innerHTML = `${esc(u.plan.label)} · <b>${Math.round(u.minutes_used)}</b> / ${u.minutes_limit} min`;
+  pill.classList.toggle("low", u.minutes_left < Math.max(5, u.minutes_limit * 0.1));
+  const sel = $("#wsSwitch");
+  sel.hidden = m.workspaces.length < 2;
+  sel.innerHTML = m.workspaces.map((w) => `<option value="${esc(w.id)}" ${w.id === m.workspace.id ? "selected" : ""}>${esc(w.name)}</option>`).join("");
+  $("#openSettings").title = `${m.user.email} · ${m.workspace.name}`;
+}
+
+async function refreshMe() { state.me = await api("/api/me"); drawAccount(); }
+
+function closeSettings() { $("#settingsModal").hidden = true; }
+
+async function openSettings(tab) {
+  $("#settingsModal").hidden = false;
+  document.querySelectorAll("#settingsModal .seg button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  const body = $("#stBody");
+  const seq = state.stSeq = (state.stSeq || 0) + 1;
+  // each tab draws into a detached box; only the latest request is shown (avoids slow-tab races)
+  body.innerHTML = `<div class="spin" style="margin-top:20px"></div>`;
+  const box = document.createElement("div");
+  try {
+    if (tab === "plan") await drawPlanTab(box);
+    else if (tab === "team") await drawTeamTab(box);
+    else await drawApiTab(box);
+  } catch (e) { box.innerHTML = `<div class="banner warn" style="margin-top:14px">${esc(e.message)}</div>`; }
+  if (seq !== state.stSeq) return;
+  body.replaceChildren(box);
+}
+
+async function drawPlanTab(body) {
+  await refreshMe();
+  const b = await api("/api/billing");
+  const u = b.usage, owner = state.me.role === "owner";
+  const pct = Math.min(100, (u.minutes_used / u.minutes_limit) * 100);
+  const reset = new Date(u.resets_at * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "long" });
+  const order = ["free", "starter", "creator", "pro"];
+  body.innerHTML = `
+    <div style="margin-top:16px">
+      <b>${esc(state.me.workspace.name)}</b> is on the <b>${esc(u.plan.label)}</b> plan${state.me.workspace.plan_status && state.me.workspace.plan_status !== "active" ? ` (${esc(state.me.workspace.plan_status)})` : ""}.
+      <div class="meter"><div style="width:${pct}%"></div></div>
+      <div class="small">${Math.round(u.minutes_used)} of ${u.minutes_limit} video minutes used · resets ${esc(reset)}</div>
+    </div>
+    ${!b.enabled ? `<div class="banner" style="margin-top:14px">Online payments aren't set up on this server yet (Stripe keys missing).</div>` : ""}
+    ${!owner ? `<div class="small" style="margin-top:10px">Only the workspace owner can change the plan.</div>` : ""}
+    <div class="plan-grid">${order.map((k) => {
+      const p = b.plans[k], cur = k === u.plan.key;
+      return `<div class="plan-card ${cur ? "cur" : ""}">
+        <b>${esc(p.label)}</b><div class="p">£${p.price_gbp}<span class="small">/mo</span></div>
+        <ul><li>${p.minutes} min / month</li><li>Videos up to ${p.max_video_minutes} min</li>
+        <li>${p.watermark ? "ClipViral watermark" : "No watermark"}</li><li>${p.brands} brand template${p.brands > 1 ? "s" : ""}</li>
+        <li>${p.seats} seat${p.seats > 1 ? "s" : ""}</li>${p.api ? "<li>API access</li>" : ""}${p.scheduler ? "<li>Scheduler & publishing</li>" : ""}</ul>
+        ${cur ? `<span class="pill done">Current plan</span>` : k === "free" ? "" :
+          `<button type="button" class="btn btn-primary btn-sm" data-plan="${k}" ${!owner || !b.enabled ? "disabled" : ""}>${b.has_subscription ? "Switch" : "Upgrade"}</button>`}
+      </div>`; }).join("")}</div>
+    ${owner && state.me.workspace.has_billing ? `<button type="button" class="btn btn-ghost btn-sm" id="portal" style="margin-top:14px">Manage billing, invoices or cancel</button>` : ""}
+    ${owner ? `<div style="margin-top:18px"><label class="f">Workspace name</label><div class="row"><input type="text" id="wsName" maxlength="80" value="${esc(state.me.workspace.name)}"><button type="button" class="btn btn-ghost btn-sm" id="wsSave" style="flex:0 0 auto">Save</button></div></div>` : ""}`;
+  body.querySelectorAll("[data-plan]").forEach((btn) => btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      if (b.has_subscription) { const r = await api("/api/billing/portal", { method: "POST" }); location.href = r.url; return; }
+      const r = await api("/api/billing/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: btn.dataset.plan }) });
+      location.href = r.url;
+    } catch (e) { toast(e.message); btn.disabled = false; }
+  });
+  $("#portal", body) && ($("#portal", body).onclick = async () => {
+    try { location.href = (await api("/api/billing/portal", { method: "POST" })).url; } catch (e) { toast(e.message); }
+  });
+  $("#wsSave", body) && ($("#wsSave", body).onclick = async () => {
+    try {
+      await api("/api/workspace", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("#wsName", body).value }) });
+      await refreshMe(); toast("Workspace renamed");
+    } catch (e) { toast(e.message); }
+  });
+}
+
+async function drawTeamTab(body) {
+  const t = await api("/api/team");
+  const owner = state.me.role === "owner";
+  body.innerHTML = `
+    <p class="small" style="margin-top:14px">Teammates share this workspace's projects, brand templates and minutes. ${t.members.length + t.invites.length} of ${t.seats} seat${t.seats > 1 ? "s" : ""} used.</p>
+    ${t.members.map((m) => `<div class="list-row"><span><b>${esc(m.name || m.email)}</b> <span class="small">${esc(m.email)}</span></span>
+      <span>${m.role === "owner" ? `<span class="pill">Owner</span>` : owner ? `<button type="button" class="btn btn-ghost btn-sm" data-rm="${esc(m.id)}">Remove</button>` : `<span class="pill">Member</span>`}</span></div>`).join("")}
+    ${t.invites.map((i) => `<div class="list-row"><span>${esc(i.email)} <span class="small">invited</span></span>
+      ${owner ? `<button type="button" class="btn btn-ghost btn-sm" data-cancel="${esc(i.id)}">Cancel</button>` : ""}</div>`).join("")}
+    ${owner ? `<label class="f">Invite a teammate</label>
+      <div class="row"><input type="email" id="invEmail" placeholder="teammate@company.com"><button type="button" class="btn btn-primary btn-sm" id="invGo" style="flex:0 0 auto">Create invite link</button></div>
+      <div id="invOut"></div>` : ""}`;
+  body.querySelectorAll("[data-rm]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Remove this teammate from the workspace?")) return;
+    try { await api(`/api/team/members/${b.dataset.rm}`, { method: "DELETE" }); drawTeamTab(body); } catch (e) { toast(e.message); }
+  });
+  body.querySelectorAll("[data-cancel]").forEach((b) => b.onclick = async () => {
+    await api(`/api/team/invites/${b.dataset.cancel}`, { method: "DELETE" }); drawTeamTab(body);
+  });
+  $("#invGo", body) && ($("#invGo", body).onclick = async () => {
+    try {
+      const r = await api("/api/team/invites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: $("#invEmail", body).value.trim() }) });
+      await drawTeamTab(body);
+      $("#invOut", body).innerHTML = `<div class="small" style="margin-top:10px">Send this link to your teammate (valid 14 days, single use):</div><div class="keybox">${esc(r.link)}</div><button type="button" class="btn btn-ghost btn-sm" id="invCopy">Copy link</button>`;
+      $("#invCopy", body).onclick = () => navigator.clipboard.writeText(r.link).then(() => toast("Link copied"), () => toast("Copy failed"));
+    } catch (e) { toast(e.message); }
+  });
+}
+
+async function drawApiTab(body) {
+  if (state.me.role !== "owner") { body.innerHTML = `<p class="small" style="margin-top:14px">Only the workspace owner can manage API keys.</p>`; return; }
+  const k = await api("/api/keys");
+  const origin = location.origin;
+  body.innerHTML = `
+    <p class="small" style="margin-top:14px">Automate ClipViral from your own tools. Keys act on this workspace and use its minutes.${k.allowed ? "" : " <b>API access is included in the Pro plan.</b>"}</p>
+    ${k.keys.map((x) => `<div class="list-row"><span><b>${esc(x.name)}</b> <span class="small">${esc(x.prefix)}… · created ${new Date(x.created_at * 1000).toLocaleDateString("en-GB")}${x.last_used_at ? " · last used " + new Date(x.last_used_at * 1000).toLocaleDateString("en-GB") : ""}</span></span>
+      <button type="button" class="btn btn-ghost btn-sm" data-revoke="${esc(x.id)}">Revoke</button></div>`).join("")}
+    <div class="row" style="margin-top:12px"><input type="text" id="keyName" placeholder="Key name, e.g. Zapier" maxlength="60"><button type="button" class="btn btn-primary btn-sm" id="keyGo" style="flex:0 0 auto" ${k.allowed ? "" : "disabled"}>Create key</button></div>
+    <div id="keyOut"></div>
+    <label class="f">Example</label>
+    <pre class="code">curl -H "Authorization: Bearer cv_live_..." \
+  -F url=https://www.youtube.com/watch?v=VIDEO -F rights=true -F niche=podcast \
+  ${esc(origin)}/api/jobs
+
+curl -H "Authorization: Bearer cv_live_..." ${esc(origin)}/api/jobs/JOB_ID</pre>
+    <div class="small">Full reference: <a href="/docs" target="_blank" rel="noopener">${esc(origin)}/docs</a></div>`;
+  body.querySelectorAll("[data-revoke]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Revoke this key? Anything using it will stop working.")) return;
+    await api(`/api/keys/${b.dataset.revoke}`, { method: "DELETE" }); drawApiTab(body);
+  });
+  $("#keyGo", body).onclick = async () => {
+    try {
+      const r = await api("/api/keys", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("#keyName", body).value.trim() || "API key" }) });
+      await drawApiTab(body);
+      $("#keyOut", body).innerHTML = `<div class="small" style="margin-top:10px">Copy your key now. It won't be shown again.</div><div class="keybox">${esc(r.key)}</div><button type="button" class="btn btn-ghost btn-sm" id="keyCopy">Copy key</button>`;
+      $("#keyCopy", body).onclick = () => navigator.clipboard.writeText(r.key).then(() => toast("Key copied"), () => toast("Copy failed"));
+    } catch (e) { toast(e.message); }
+  };
 }
 
 function selectAspect(k) {
@@ -225,7 +384,7 @@ function selectStyle(k) {
 
 function setSource(src) {
   state.src = src;
-  document.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b.dataset.src === src));
+  document.querySelectorAll("#newForm .seg button").forEach((b) => b.classList.toggle("on", b.dataset.src === src));
   $("#linkBox").hidden = src !== "link";
   $("#drop").hidden = src !== "file";
   if (src === "link") $("#url").focus();
@@ -294,11 +453,14 @@ function upload() {
     if (xhr.status >= 200 && xhr.status < 300) {
       const job = JSON.parse(xhr.responseText);
       msg.textContent = "";
+      refreshMe().catch(() => {});
       if (linkMode) { $("#url").value = ""; $("#rights").checked = false; }
       else { state.file = null; $("#file").value = ""; $("#fileName").textContent = ""; }
       updateGo();
       await loadProjects();
       openJob(job.id);
+    } else if (xhr.status === 401) {
+      location.href = "/login?mode=login";
     } else {
       let d = xhr.statusText;
       try { d = JSON.parse(xhr.responseText).detail; } catch {}
@@ -403,7 +565,7 @@ async function refresh(first = false) {
     updateCard(card, c);
   });
 
-  if (prevStatus && prevStatus !== job.status) loadProjects();
+  if (prevStatus && prevStatus !== job.status) { loadProjects(); refreshMe().catch(() => {}); }
   const busy = job.status !== "done" && job.status !== "error" || (job.clips || []).some((c) => c.status === "queued" || c.status === "rendering");
   if (!busy) { clearInterval(state.poll); state.poll = setInterval(refresh, 8000); }
   else if (!first) { clearInterval(state.poll); state.poll = setInterval(refresh, 2000); }

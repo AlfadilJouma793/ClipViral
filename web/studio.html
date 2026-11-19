@@ -13,7 +13,12 @@
 <nav class="nav">
   <div class="wrap" style="max-width:1480px">
     <a class="logo" href="/"><img src="/static/logo.svg" alt="" width="30" height="30">ClipViral <span class="pill" style="margin-left:4px">Studio</span></a>
-    <div class="links"><a href="/#pricing">Pricing</a><a href="/">Home</a></div>
+    <div class="links acct">
+      <select id="wsSwitch" aria-label="Workspace" hidden></select>
+      <button type="button" class="usage-pill" id="usagePill" title="Video minutes used this month"></button>
+      <button type="button" class="btn btn-ghost btn-sm" id="openSettings">Settings</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="logout">Log out</button>
+    </div>
   </div>
 </nav>
 
@@ -118,6 +123,20 @@
   </main>
 </div>
 <div class="toast" id="toast"></div>
+<div class="modal-bg" id="settingsModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="stTitle" style="width:min(860px,100%)">
+    <div class="row" style="justify-content:space-between">
+      <h2 id="stTitle">Settings</h2>
+      <button type="button" class="btn btn-ghost btn-sm" id="stClose" style="flex:0 0 auto">Close</button>
+    </div>
+    <div class="seg" style="grid-template-columns:repeat(3,1fr);margin-top:10px">
+      <button type="button" class="on" data-tab="plan">Plan &amp; billing</button>
+      <button type="button" data-tab="team">Team</button>
+      <button type="button" data-tab="api">API keys</button>
+    </div>
+    <div id="stBody"></div>
+  </div>
+</div>
 <div class="modal-bg" id="brandModal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="bmTitle">
     <div class="row" style="justify-content:space-between">

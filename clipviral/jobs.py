@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 
 from . import config
-from . import brands
+from . import accounts, brands
 from .pipeline import broll, fetch, highlights, media, render, transcribe, visual
 from .pipeline.niches import get_niche
 
@@ -61,12 +61,14 @@ def update(job_id: str, **fields) -> dict:
         return job
 
 
-def list_jobs() -> list[dict]:
+def list_jobs(workspace_id: str | None = None) -> list[dict]:
     out = []
     for p in config.JOBS_DIR.glob("*/job.json"):
         try:
             j = json.loads(p.read_text())
         except Exception:
+            continue
+        if workspace_id is not None and j.get("workspace_id") != workspace_id:
             continue
         out.append({k: j.get(k) for k in ("id", "name", "status", "step", "progress",
                                          "created_at", "niche", "duration", "error")}
@@ -79,7 +81,7 @@ def delete(job_id: str) -> None:
     shutil.rmtree(job_dir(job_id), ignore_errors=True)
 
 
-def create(name: str, options: dict) -> dict:
+def create(name: str, options: dict, workspace_id: str | None = None) -> dict:
     job_id = uuid.uuid4().hex[:12]
     job_dir(job_id).mkdir(parents=True)
     niche = get_niche(options.get("niche"))
@@ -107,7 +109,7 @@ def create(name: str, options: dict) -> dict:
     opts["max_len"] = max(opts["max_len"], opts["min_len"] + 5)
     job = {"id": job_id, "name": name, "status": "uploading", "step": "upload", "progress": 0,
            "created_at": time.time(), "niche": opts["niche"], "options": opts, "clips": [],
-           "notes": [], "error": None}
+           "notes": [], "error": None, "workspace_id": workspace_id}
     save(job)
     return job
 
@@ -138,6 +140,8 @@ def process(job_id: str) -> None:
     _set(job_id, "probe", 16 if job.get("url") else 3)
     meta = media.probe(src)
     update(job_id, meta=meta, duration=meta["duration"])
+    if job.get("workspace_id"):
+        accounts.charge(job["workspace_id"], job_id, meta["duration"] / 60)  # raises QuotaError
 
     # transcript
     tpath = d / "transcript.json"
@@ -218,6 +222,8 @@ def _render_one(job_id: str, clip_id: str, words: list[dict] | None = None, meta
     opts = {**job["options"], "style": clip["style"], "layout": clip["layout"],
             "accent": clip["accent"], "position": clip["position"]}
     opts.update(brands.render_opts(opts.get("brand_id")))
+    if job.get("workspace_id") and accounts.plan_of(job["workspace_id"])["watermark"]:
+        opts["watermark"] = accounts.FREE_WATERMARK  # Free plan
     try:
         if clip.get("use_broll") and clip.get("broll") is None:
             if broll.available():
@@ -313,7 +319,11 @@ def _worker() -> None:
         except Exception as exc:
             log.error("job %s failed: %s\n%s", job_id, exc, traceback.format_exc())
             try:
-                update(job_id, status="error", error=str(exc)[-600:])
+                j = update(job_id, status="error", error=str(exc)[-600:])
+                # give the minutes back if the job never produced a clip
+                if task == "process" and j.get("workspace_id") and \
+                        not any(c.get("status") == "ready" for c in j.get("clips", [])):
+                    accounts.refund(j["workspace_id"], job_id)
             except Exception:
                 pass
         finally:
