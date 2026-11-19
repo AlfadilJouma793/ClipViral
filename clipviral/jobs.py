@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import config
 from . import brands
-from .pipeline import fetch, highlights, media, render, transcribe
+from .pipeline import fetch, highlights, media, render, transcribe, visual
 from .pipeline.niches import get_niche
 
 log = logging.getLogger("clipviral.jobs")
@@ -154,30 +154,41 @@ def process(job_id: str) -> None:
                 wav, meta["duration"], opts.get("language"),
                 on_progress=lambda f: _set(job_id, "transcribe", t0 + (50 - t0) * f))
         else:
-            raise RuntimeError("This video has no audio track, so there is nothing to transcribe.")
+            tr = {"language": None, "words": [], "source": "no-audio"}  # silent video: visual mode
         tpath.write_text(json.dumps(tr))
     tr = json.loads(tpath.read_text())
     words = tr["words"]
-    if len(words) < 8:
-        raise RuntimeError("We couldn't hear enough speech in this video to find highlights.")
 
     # analysis
     _set(job_id, "analyze", 52)
-    wav = d / "audio.wav"
-    if not wav.exists():
-        media.extract_audio(src, wav)
-    curve = media.loudness_curve(wav)
-    sents = transcribe.sentences(words)
+    curve = None
+    if meta["has_audio"]:
+        wav = d / "audio.wav"
+        if not wav.exists():
+            media.extract_audio(src, wav)
+        curve = media.loudness_curve(wav)
     notes = []
-    picks = highlights.find_highlights(sents, words, curve, opts["niche"], opts["num_clips"],
-                                       opts["min_len"], opts["max_len"], opts.get("prompt", ""),
-                                       on_note=notes.append)
+    minutes = max(meta["duration"] / 60, 0.1)
+    visual_mode = len(words) < 8 or len(words) / minutes < 25  # little or no speech
+    if visual_mode:
+        notes.append("Little speech detected: moments were picked from on-screen action and sound.")
+        picks = visual.find_visual_moments(src, d, meta["duration"], curve, words, opts["niche"],
+                                           opts["num_clips"], opts["min_len"], opts["max_len"],
+                                           opts.get("prompt", ""), on_note=notes.append)
+    else:
+        sents = transcribe.sentences(words)
+        if curve is None:  # transcript supplied for a silent video: flat loudness
+            import numpy as np
+            curve = np.full(int(meta["duration"] / 0.25) + 1, -30.0)
+        picks = highlights.find_highlights(sents, words, curve, opts["niche"], opts["num_clips"],
+                                           opts["min_len"], opts["max_len"], opts.get("prompt", ""),
+                                           on_note=notes.append)
     if not picks:
         raise RuntimeError("No suitable moments found. Try a shorter minimum clip length.")
     clips = []
     for i, p in enumerate(picks):
         clips.append({**p, "id": f"c{i + 1:02d}", "status": "queued", "rank": i + 1,
-                      "transcript": " ".join(s["text"] for s in sents[p["s_idx"]:p["e_idx"] + 1]),
+                      "transcript": " ".join(w["w"] for w in words if p["start"] - 0.05 <= w["s"] < p["end"]),
                       "style": opts["style"], "layout": opts["layout"], "accent": opts["accent"],
                       "position": opts["position"], "aspect": opts.get("aspect", "9:16"),
                       "emojis": opts.get("emojis", False), "cuts": [], "track": None})

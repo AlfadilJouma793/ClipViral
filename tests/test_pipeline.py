@@ -397,3 +397,79 @@ def test_api_brands_words_and_clip_edits(monkeypatch, tmp_path):
     assert c.patch(f"/api/jobs/{job['id']}/clips/c01", json={"start": 0, "end": 900}).status_code == 200
     r = c.patch(f"/api/jobs/{job['id']}/clips/c01", json={"start": 1, "end": 2})
     assert r.status_code == 400  # < 3 seconds
+
+
+# ---------------------------------------------------------------- visual (no-speech) clipping
+def _action_video(path, with_audio=True):
+    """60 s: calm static scene, with a burst of motion + noise between 30 s and 42 s."""
+    vf = ("[0][1]overlay=x='if(between(t,30,42),mod(t*900,1100),100)':"
+          "y='if(between(t,30,42),300+200*sin(t*9),300)'")
+    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0x223344:s=960x540:r=25:d=60",
+           "-f", "lavfi", "-i", "color=c=orange:s=140x140:r=25:d=60"]
+    if with_audio:
+        cmd += ["-f", "lavfi", "-i", "anoisesrc=d=60:c=pink:a=0.02",
+                "-f", "lavfi", "-i", "anoisesrc=d=12:c=white:a=0.6"]
+        vf += "[v];[3]adelay=30000|30000[n];[2][n]amix=inputs=2:duration=first[a]"
+        cmd += ["-filter_complex", vf, "-map", "[v]", "-map", "[a]", "-c:a", "aac"]
+    else:
+        cmd += ["-filter_complex", vf]
+    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "60", str(path)]
+    subprocess.run(cmd, check=True)
+
+
+def test_visual_candidates_find_the_action(tmp_path):
+    from clipviral.pipeline import media, visual
+    src = tmp_path / "act.mp4"
+    _action_video(src)
+    meta = media.probe(src)
+    media.extract_audio(src, tmp_path / "a.wav")
+    curve = media.loudness_curve(tmp_path / "a.wav")
+    sig = visual.frame_signals(src, meta["duration"])
+    assert sig["motion"].size > 100
+    cands = visual.candidates(sig, curve, 3, 8, 15)
+    best = cands[0]
+    overlap = min(best["end"], 42) - max(best["start"], 30)
+    assert overlap > 6, best
+    picks = visual.heuristic_writeup(cands, "general", 2)
+    assert picks[0]["engine"] == "visual-signals" and picks[0]["captions"]["x"]
+
+
+def test_process_silent_video_end_to_end(monkeypatch, tmp_path):
+    from clipviral import jobs
+    monkeypatch.setattr(config, "JOBS_DIR", tmp_path)
+    monkeypatch.setattr(config, "AI_DISABLED", True)
+    job = jobs.create("silent", {"niche": "general", "num_clips": 2, "min_len": 8, "max_len": 15})
+    d = jobs.job_dir(job["id"])
+    _action_video(d / "source.mp4", with_audio=False)
+    jobs.update(job["id"], source="source.mp4")
+    jobs.process(job["id"])
+    j = jobs.load(job["id"])
+    assert j["status"] == "done" and j["clips"], j.get("error")
+    assert all(c["status"] == "ready" for c in j["clips"])
+    assert any("Little speech" in n for n in j["notes"])
+    assert any(min(c["end"], 42) - max(c["start"], 30) > 5 for c in j["clips"])
+
+
+def test_claude_vision_request_shape(monkeypatch, tmp_path):
+    from clipviral.pipeline import highlights, visual
+    src = tmp_path / "act.mp4"
+    _action_video(src, with_audio=False)
+    cands = [{"start": 30.0, "end": 40.0, "signal": 1.0}, {"start": 5.0, "end": 15.0, "signal": 0.1}]
+    sent = {}
+
+    class Msgs:
+        def parse(self, **kw):
+            sent.update(kw)
+            pick = visual.VisualPick(candidate=0, title="Orange box chaos", hook="Watch it fly", virality=88,
+                                     scores=highlights.Scores(hook=90, flow=80, value=70, trend=75),
+                                     why="Fast motion.", hashtags=["#satisfying"],
+                                     captions=highlights.PlatformCaptions(tiktok="t", instagram="i", youtube="y", x="x"))
+            return SimpleNamespace(stop_reason="end_turn", parsed_output=visual.VisualPlan(clips=[pick, pick]))
+
+    import anthropic
+    monkeypatch.setattr(anthropic, "Anthropic", lambda: SimpleNamespace(beta=SimpleNamespace(messages=Msgs())))
+    out = visual.claude_rank(src, tmp_path, cands, [], "general", 2)
+    assert len(out) == 1 and out[0]["start"] == 30.0 and out[0]["hashtags"] == ["satisfying"]
+    imgs = [b for b in sent["messages"][0]["content"] if b["type"] == "image"]
+    assert len(imgs) == 2 and imgs[0]["source"]["media_type"] == "image/jpeg" and len(imgs[0]["source"]["data"]) > 1000
+    assert sent["output_format"] is visual.VisualPlan

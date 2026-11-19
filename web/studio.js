@@ -376,7 +376,8 @@ async function refresh(first = false) {
   }
   $("#jt").textContent = job.name;
   const niche = state.cfg.niches.find((n) => n.key === job.niche);
-  const engine = job.engine === "claude" ? "AI picks" : job.engine === "signals" ? "Signal scoring" : "";
+  const engine = { claude: "AI picks", signals: "Signal scoring", "claude-vision": "AI vision picks",
+                   "visual-signals": "Action & sound scoring" }[job.engine] || "";
   $("#jlink").innerHTML = job.url ? `Source: <a href="${esc(job.url)}" target="_blank" rel="noopener noreferrer">${esc(job.url)}</a>` : "";
   $("#jsub").textContent = [niche?.label, job.duration ? fmt(job.duration) + " source" : "", engine, job.transcript_source === "uploaded-transcript" ? "Your transcript" : ""].filter(Boolean).join(" · ");
 
