@@ -473,3 +473,85 @@ def test_claude_vision_request_shape(monkeypatch, tmp_path):
     imgs = [b for b in sent["messages"][0]["content"] if b["type"] == "image"]
     assert len(imgs) == 2 and imgs[0]["source"]["media_type"] == "image/jpeg" and len(imgs[0]["source"]["data"]) > 1000
     assert sent["output_format"] is visual.VisualPlan
+
+
+# ---------------------------------------------------------------- B-roll
+def test_broll_plan_fetch_and_render(monkeypatch, tmp_path, words):
+    from clipviral.pipeline import broll
+    monkeypatch.setattr(broll, "CACHE", tmp_path / "cache")
+    monkeypatch.setenv("PEXELS_API_KEY", "test-key")
+    monkeypatch.setattr(config, "AI_DISABLED", True)
+    stock = tmp_path / "stock.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=720x1280:r=25:d=4",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(stock)], check=True)
+    searches = []
+
+    def fake_search(query, size):
+        searches.append((query, broll._orientation(size)))
+        return [{"id": 1, "duration": 4, "url": "https://pexels.example/v/1", "user": {"name": "Ann", "url": "u"},
+                 "video_files": [{"quality": "sd", "file_type": "video/mp4", "width": 360, "height": 640,
+                                  "link": "file:///nonexistent-small.mp4"},
+                                 {"quality": "hd", "file_type": "video/mp4", "width": 720, "height": 1280,
+                                  "link": stock.as_uri()}]},
+                {"id": 2, "duration": 4, "url": "https://pexels.example/v/2", "user": {"name": "Bo"},
+                 "video_files": [{"quality": "hd", "file_type": "video/mp4", "width": 720, "height": 1280,
+                                  "link": stock.as_uri()}]}]
+    monkeypatch.setattr(broll, "search", fake_search)
+
+    rel = render.clip_words(words, 1.0, 23.0)
+    planned = broll.plan_offline(rel, "property_uk")
+    assert planned and all(rel[i]["s"] >= 3.0 for i, _ in planned)
+    assert len({round(rel[i]["s"]) for i, _ in planned}) == len(planned)
+    items = broll.build(rel, 1.0, "property_uk", (1080, 1920))
+    assert items and searches[0][1] == "portrait"
+    assert items[0]["credit"]["name"] == "Ann" and Path(items[0]["path"]).exists()
+    assert len({it["pexels_id"] for it in items}) == len(items)  # no repeated stock clip
+
+    src = tmp_path / "src.mp4"
+    _talk_video(src, 24)
+    clip = {"id": "b1", "start": 1.0, "end": 23.0, "hook": "", "use_broll": True, "broll": items[:1], "track": None}
+    render.render_clip(tmp_path, src, {"width": 1280, "height": 720, "duration": 24, "has_audio": True}, clip, words,
+                       {"layout": "center", "tighten": False, "show_hook": False, "progress_bar": False})
+    t_in = items[0]["s"] - 1.0 + 1.0  # one second into the cutaway (output time; nothing was cut)
+    frame = tmp_path / "f.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{t_in:.2f}", "-i", str(tmp_path / "b1.mp4"),
+                    "-frames:v", "1", str(frame)], check=True)
+    import cv2
+    px = cv2.imread(str(frame))[200, 540]  # top area, away from captions
+    assert px[2] > 200 and px[1] < 60 and px[0] < 60, px  # red stock footage is showing
+    frame2 = tmp_path / "g.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", "1.0", "-i", str(tmp_path / "b1.mp4"),
+                    "-frames:v", "1", str(frame2)], check=True)
+    px2 = cv2.imread(str(frame2))[200, 540]
+    assert not (px2[2] > 200 and px2[1] < 60 and px2[0] < 60)  # original video before the cutaway
+
+
+def test_map_time():
+    keep = [(0.0, 2.0), (3.0, 5.0)]
+    assert render.map_time(1.0, keep) == 1.0
+    assert render.map_time(2.5, keep) == 2.0  # removed part -> start of next kept part
+    assert render.map_time(4.0, keep) == 3.0
+    assert render.map_time(6.0, keep) is None
+
+
+def test_broll_search_uses_v1_then_falls_back_on_404(monkeypatch):
+    import urllib.error
+    from clipviral.pipeline import broll
+    monkeypatch.setenv("PEXELS_API_KEY", "k")
+    calls = []
+
+    def fake_get(url):
+        calls.append(url)
+        if "/v1/" in url:
+            raise urllib.error.HTTPError(url, 404, "nf", {}, None)
+        return {"videos": [{"id": 9}]}
+    monkeypatch.setattr(broll, "_get_json", fake_get)
+    assert broll.search("modern kitchen", (1080, 1350)) == [{"id": 9}]
+    assert "api.pexels.com/v1/videos/search" in calls[0] and "orientation=portrait" in calls[0]
+    assert "query=modern+kitchen" in calls[0]
+
+    def auth_fail(url):
+        raise urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
+    monkeypatch.setattr(broll, "_get_json", auth_fail)
+    with pytest.raises(RuntimeError):
+        broll.search("x", (1080, 1080))

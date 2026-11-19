@@ -94,6 +94,21 @@ def remap(words: list[dict], keep: list[tuple[float, float]]) -> list[dict]:
     return out
 
 
+def map_time(t: float, keep: list[tuple[float, float]]) -> float | None:
+    """Clip-relative source time -> time on the edited (cut) timeline.
+
+    A time inside a removed section maps to the start of the next kept part.
+    """
+    acc = 0.0
+    for a, b in keep:
+        if t < a:
+            return acc
+        if t <= b:
+            return acc + (t - a)
+        acc += b - a
+    return None
+
+
 def clip_words(all_words: list[dict], start: float, end: float) -> list[dict]:
     return [{"w": w["w"], "s": round(w["s"] - start, 3), "e": round(min(w["e"], end) - start, 3)}
             for w in all_words if w["s"] >= start - 0.05 and w["s"] < end]
@@ -200,17 +215,36 @@ def render_clip(job_dir: Path, src: Path, meta: dict, clip: dict, words: list[di
         emojis=bool(clip.get("emojis", opts.get("emojis", False))))
     build_srt(out_words, job_dir / f"{cid}.srt")
 
+    inputs: list[str] = []
+    n_in = 1
+    cur = "v1"
+    # B-roll cutaways (stored in source time -> mapped onto the edited timeline)
+    for i, item in enumerate((clip.get("broll") or []) if clip.get("use_broll") else []):
+        path = Path(item.get("path", ""))
+        if not path.exists():
+            continue
+        a = map_time(float(item["s"]) - start, keep)
+        if a is None:
+            continue
+        d = min(float(item["e"]) - float(item["s"]), out_dur - a - 0.5)
+        if d < 1.0:
+            continue
+        inputs += ["-stream_loop", "-1", "-i", str(path)]
+        vchain += (f";[{n_in}:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,"
+                   f"fps={fps},trim=duration={d:.3f},setpts=PTS-STARTPTS+{a:.3f}/TB[b{i}];"
+                   f"[{cur}][b{i}]overlay=eof_action=pass:enable='between(t,{a:.3f},{a + d:.3f})'[vb{i}]")
+        cur = f"vb{i}"
+        n_in += 1
+
     ass_opts = ass.name
     fontsdir = opts.get("fontsdir")
     if fontsdir and Path(fontsdir).is_dir():
         rel = os.path.relpath(fontsdir, job_dir).replace("\\", "/")
         if re.fullmatch(r"[\w./-]+", rel):
             ass_opts += f":fontsdir={rel}"
-    vchain += f";[v1]ass={ass_opts}[v2]"
+    vchain += f";[{cur}]ass={ass_opts}[v2]"
 
-    inputs: list[str] = []
     last = "v2"
-    n_in = 1
     # colour emoji pop-ups above the captions
     size = int(min(W, H) * 0.13)
     ey = max(10, H - caption_margin(position, H) - int(min(W, H) * 0.11) - size)

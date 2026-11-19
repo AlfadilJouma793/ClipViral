@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import config
 from . import brands
-from .pipeline import fetch, highlights, media, render, transcribe, visual
+from .pipeline import broll, fetch, highlights, media, render, transcribe, visual
 from .pipeline.niches import get_niche
 
 log = logging.getLogger("clipviral.jobs")
@@ -191,7 +191,8 @@ def process(job_id: str) -> None:
                       "transcript": " ".join(w["w"] for w in words if p["start"] - 0.05 <= w["s"] < p["end"]),
                       "style": opts["style"], "layout": opts["layout"], "accent": opts["accent"],
                       "position": opts["position"], "aspect": opts.get("aspect", "9:16"),
-                      "emojis": opts.get("emojis", False), "cuts": [], "track": None})
+                      "emojis": opts.get("emojis", False), "cuts": [], "track": None,
+                      "use_broll": bool(opts.get("broll")), "broll": None})
     update(job_id, clips=clips, notes=job.get("notes", []) + notes,
            engine=picks[0].get("engine"), transcript_source=tr.get("source"))
 
@@ -218,6 +219,18 @@ def _render_one(job_id: str, clip_id: str, words: list[dict] | None = None, meta
             "accent": clip["accent"], "position": clip["position"]}
     opts.update(brands.render_opts(opts.get("brand_id")))
     try:
+        if clip.get("use_broll") and clip.get("broll") is None:
+            if broll.available():
+                rel = render.clip_words(words, clip["start"], clip["end"])
+                try:
+                    clip["broll"] = broll.build(rel, clip["start"], opts.get("niche", "general"),
+                                                render.output_size(clip.get("aspect")))
+                except Exception as exc:  # never fail a render because of stock footage
+                    log.warning("B-roll failed: %s", exc)
+                    clip["broll"] = []
+            else:
+                clip["broll"] = []
+            _patch_clip(job_id, clip_id, broll=clip["broll"])
         info = render.render_clip(d, d / job["source"], meta, clip, words, opts)
         _patch_clip(job_id, clip_id, status="ready", track=clip.get("track"),
                     version=int(clip.get("version", 0)) + 1, error=None, **info)
@@ -242,18 +255,26 @@ def edit_clip(job_id: str, clip_id: str, changes: dict) -> dict:
     job = load(job_id)
     clip = next(c for c in job["clips"] if c["id"] == clip_id)
     allowed = {"hook", "title", "style", "layout", "accent", "position", "start", "end", "emphasis",
-               "aspect", "emojis", "crop_x", "cuts"}
+               "aspect", "emojis", "crop_x", "cuts", "use_broll"}
     fields = {k: v for k, v in changes.items() if k in allowed and v is not None}
     if "aspect" in fields:
         if fields["aspect"] not in render.ASPECTS:
             raise ValueError("Unknown aspect ratio.")
         if fields["aspect"] != clip.get("aspect", "9:16"):
             fields["track"] = None  # crop width changes with the shape
+            if clip.get("use_broll"):
+                fields["broll"] = None  # stock footage orientation changes too
     if "crop_x" in fields:
         fields["crop_x"] = round(min(1.0, max(0.0, float(fields["crop_x"]))), 4)
         fields.setdefault("layout", "manual")
     if "emojis" in fields:
         fields["emojis"] = bool(fields["emojis"])
+    if "use_broll" in fields:
+        fields["use_broll"] = bool(fields["use_broll"])
+        if fields["use_broll"] and not clip.get("broll"):
+            fields["broll"] = None  # (re)plan cutaways on the next render
+    if ("start" in changes or "end" in changes) and clip.get("use_broll"):
+        fields["broll"] = None  # the words changed: plan new cutaways
     if "cuts" in fields:
         cuts = []
         for pair in list(fields["cuts"])[:500]:

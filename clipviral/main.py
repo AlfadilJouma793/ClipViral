@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import brands, config, jobs
-from .pipeline import fetch, render
+from .pipeline import broll, fetch, render
 from .pipeline.captions import STYLES
 from .pipeline.niches import public_niches
 
@@ -68,7 +68,7 @@ def get_config():
         links = False
     return {"niches": public_niches(), "styles": STYLES, "layouts": LAYOUTS, "aspects": ASPECT_LABELS,
             "max_clip_seconds": render.MAX_CLIP_SECONDS,
-            "ai": config.ai_available(), "whisper": whisper, "links": links,
+            "ai": config.ai_available(), "whisper": whisper, "links": links, "broll": broll.available(),
             "max_video_minutes": config.MAX_VIDEO_SECONDS // 60,
             "whisper_model": config.WHISPER_MODEL,
             "max_upload_gb": round(config.MAX_UPLOAD_BYTES / 1024**3, 1)}
@@ -174,6 +174,8 @@ def _public(job: dict) -> dict:
     j = json.loads(json.dumps(job))
     for c in j.get("clips", []):
         c.pop("track", None)
+        for b in c.get("broll") or []:
+            b.pop("path", None)  # never expose server paths
     return j
 
 
@@ -204,6 +206,7 @@ class ClipEdit(BaseModel):
     emojis: Optional[bool] = None
     crop_x: Optional[float] = None
     cuts: Optional[List[Tuple[float, float]]] = None
+    use_broll: Optional[bool] = None
 
 
 @app.patch("/api/jobs/{job_id}/clips/{clip_id}")
@@ -395,7 +398,10 @@ def export_zip(job_id: str):
                          f"Hook: {c['hook']}\nWhy: {c['why']}\n\n"
                          f"TikTok:\n{cap.get('tiktok', '')}\n\nInstagram:\n{cap.get('instagram', '')}\n\n"
                          f"YouTube Shorts:\n{cap.get('youtube', '')}\n\n"
-                         f"X (Twitter):\n{cap.get('x', '')}\n")
+                         f"X (Twitter):\n{cap.get('x', '')}\n"
+                         + ("\nB-roll (Pexels): " + ", ".join(
+                             f"{b.get('credit', {}).get('name', 'Pexels')} {b.get('url') or ''}".strip()
+                             for b in c.get("broll") or []) + "\n" if c.get("use_broll") and c.get("broll") else ""))
         z.writestr("POST-CAPTIONS.md", f"# {job['name']}\n\n" + "\n---\n\n".join(posts))
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/zip",

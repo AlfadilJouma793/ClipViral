@@ -70,6 +70,7 @@ async function init() {
   $("#bmNew").onclick = () => editBrand(null);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#brandModal").hidden) closeBrands(); });
   await loadBrands();
+  if (!state.cfg.broll) { $("#broll").disabled = true; $("#brollNote").hidden = false; }
 
   const lay = $("#layout");
   Object.entries(state.cfg.layouts).forEach(([k, label]) => lay.add(new Option(label, k)));
@@ -274,6 +275,7 @@ function upload() {
   fd.append("emojis", $("#emojis").checked);
   fd.append("cut_fillers", $("#cutFillers").checked);
   fd.append("brand_id", $("#brand").value);
+  fd.append("broll", $("#broll").checked);
 
   const bar = $("#upbar"), go = $("#go"), msg = $("#upmsg");
   bar.style.display = linkMode ? "none" : "block"; go.disabled = true;
@@ -428,6 +430,7 @@ function makeCard(c) {
         </div>
         <div class="captext"></div>
       </div>
+      <div class="small credits" hidden></div>
       <div class="actions">
         <a class="btn btn-primary btn-sm dl">⬇ MP4</a>
         <a class="btn btn-ghost btn-sm srt">SRT</a>
@@ -444,6 +447,7 @@ function makeCard(c) {
         <div class="row">
           <select class="e-layout" aria-label="Framing"></select>
           <label class="toggle" style="flex:0 0 auto;gap:8px">Emojis <input type="checkbox" class="e-emojis"></label>
+          <label class="toggle" style="flex:0 0 auto;gap:8px">B-roll <input type="checkbox" class="e-broll"></label>
         </div>
         <div class="reframe" hidden>
           <div class="small" style="margin-bottom:6px">Drag the box to choose what stays in frame.</div>
@@ -502,6 +506,7 @@ function makeCard(c) {
       accent: $(".e-accent", el).value,
       aspect: $(".e-aspect", el).value,
       emojis: $(".e-emojis", el).checked,
+      use_broll: $(".e-broll", el).checked,
       cuts: cutRanges(card),
     };
     if (body.layout === "manual") body.crop_x = d.crop_x;
@@ -527,6 +532,8 @@ async function openEditor(card) {
   $(".e-layout", el).value = c.layout;
   $(".e-aspect", el).value = c.aspect || "9:16";
   $(".e-emojis", el).checked = !!c.emojis;
+  $(".e-broll", el).checked = !!c.use_broll;
+  $(".e-broll", el).disabled = !state.cfg.broll;
   $(".e-accent", el).value = (c.accent || "#ffe14d").toLowerCase();
   showTrim(card);
   showReframe(card);
@@ -656,6 +663,10 @@ function updateCard(card, c) {
   $(".bars", el).innerHTML = [["Hook", s.hook], ["Flow", s.flow], ["Value", s.value], ["Trend", s.trend]]
     .map(([l, v]) => `<div>${l} ${v ?? "–"}<i><b style="width:${Number(v) || 0}%"></b></i></div>`).join("");
   $(".captext", el).textContent = c.captions?.[card.platform] || "";
+  const br = (c.use_broll && c.broll) || [];
+  const cr = $(".credits", el);
+  cr.hidden = !br.length;
+  cr.innerHTML = br.length ? "B-roll from Pexels: " + br.map((b) => `<a href="${esc(b.credit?.url || b.url || "https://www.pexels.com")}" target="_blank" rel="noopener noreferrer">${esc(b.credit?.name || "Pexels")}</a>`).join(", ") : "";
 
   const ov = $(".overlay", el), video = $("video", el);
   const ready = c.status === "ready";
