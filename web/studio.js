@@ -42,6 +42,11 @@ async function init() {
   const qp = new URLSearchParams(location.search);
   if (qp.get("billing") === "success") toast("Thanks! Your plan will update in a few seconds.");
   if (qp.get("billing")) history.replaceState(null, "", "/studio" + location.hash);
+  if (qp.get("connected")) { toast("Account connected"); openSettings("social"); }
+  if (qp.get("social_error")) { toast(qp.get("social_error")); openSettings("social"); }
+  if (qp.get("connected") || qp.get("social_error")) history.replaceState(null, "", "/studio" + location.hash);
+  $("#pmClose").onclick = () => { $("#postModal").hidden = true; };
+  $("#postModal").onclick = (e) => { if (e.target.id === "postModal") $("#postModal").hidden = true; };
   $("#maxgb").textContent = state.cfg.max_upload_gb;
   $("#maxmin").textContent = state.cfg.max_video_minutes;
 
@@ -88,6 +93,7 @@ async function init() {
     if (e.key !== "Escape") return;
     if (!$("#brandModal").hidden) closeBrands();
     if (!$("#settingsModal").hidden) closeSettings();
+    if (!$("#postModal").hidden) $("#postModal").hidden = true;
   });
   await loadBrands();
   if (!state.cfg.broll) { $("#broll").disabled = true; $("#brollNote").hidden = false; }
@@ -165,6 +171,7 @@ async function openSettings(tab) {
   const box = document.createElement("div");
   try {
     if (tab === "plan") await drawPlanTab(box);
+    else if (tab === "social") await drawSocialTab(box);
     else if (tab === "team") await drawTeamTab(box);
     else await drawApiTab(box);
   } catch (e) { box.innerHTML = `<div class="banner warn" style="margin-top:14px">${esc(e.message)}</div>`; }
@@ -216,6 +223,112 @@ async function drawPlanTab(body) {
       await refreshMe(); toast("Workspace renamed");
     } catch (e) { toast(e.message); }
   });
+}
+
+const PLATFORM_ICON = { youtube: "▶", tiktok: "♪", instagram: "◎", x: "𝕏" };
+const fmtWhen = (t) => new Date(t * 1000).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+async function drawSocialTab(body) {
+  const o = await api("/api/social");
+  const posts = (await api("/api/posts")).posts;
+  const byPlat = (k) => o.connections.filter((c) => c.platform === k);
+  body.innerHTML = `
+    <p class="small" style="margin-top:14px">Connect your accounts to publish clips straight from ClipViral, now or on a schedule.${o.allowed ? "" : " <b>Publishing is included in the Starter plan and above.</b>"}</p>
+    ${o.platforms.map((p) => `<div class="list-row"><span><b>${PLATFORM_ICON[p.key]} ${esc(p.label)}</b>
+        ${byPlat(p.key).map((c) => `<span class="pill" style="margin-left:6px">${esc(c.account_name)} <a href="#" data-disc="${esc(c.id)}" title="Disconnect" style="margin-left:4px">✕</a></span>`).join("")}
+        ${p.configured ? "" : `<span class="small"> · not set up on this server</span>`}</span>
+      <button type="button" class="btn btn-ghost btn-sm" data-connect="${p.key}" ${p.configured && o.allowed ? "" : "disabled"}>${byPlat(p.key).length ? "Add account" : "Connect"}</button></div>`).join("")}
+    <label class="f">Posts</label>
+    ${posts.length ? posts.map((p) => `<div class="list-row"><span>${PLATFORM_ICON[p.platform] || ""} <b>${esc(p.account_name || p.platform)}</b>
+        <span class="small">· ${esc(fmtWhen(p.published_at || p.scheduled_at))} · ${esc((p.caption || "").slice(0, 60))}</span>
+        ${p.error && p.status !== "published" ? `<div class="small" style="color:var(--coral)">${esc(p.error)}</div>` : ""}</span>
+      <span>${p.status === "published" && p.url ? `<a class="btn btn-ghost btn-sm" href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">View</a>` : `<span class="pill ${p.status === "published" ? "done" : p.status === "failed" ? "error" : "queued"}">${esc(p.status)}</span>`}
+      ${p.status === "scheduled" ? `<button type="button" class="btn btn-ghost btn-sm" data-cancel-post="${esc(p.id)}">Cancel</button>` : ""}</span></div>`).join("")
+      : `<div class="small">Nothing posted or scheduled yet. Use 📤 Post on any clip.</div>`}`;
+  body.querySelectorAll("[data-connect]").forEach((b) => b.onclick = async () => {
+    try { location.href = (await api(`/api/social/connect/${b.dataset.connect}`, { method: "POST" })).url; } catch (e) { toast(e.message); }
+  });
+  body.querySelectorAll("[data-disc]").forEach((a) => a.onclick = async (ev) => {
+    ev.preventDefault();
+    if (!confirm("Disconnect this account? Its scheduled posts will be cancelled.")) return;
+    await api(`/api/social/connections/${a.dataset.disc}`, { method: "DELETE" }); drawSocialTab(body);
+  });
+  body.querySelectorAll("[data-cancel-post]").forEach((b) => b.onclick = async () => {
+    try { await api(`/api/posts/${b.dataset.cancelPost}`, { method: "DELETE" }); drawSocialTab(body); } catch (e) { toast(e.message); }
+  });
+}
+
+const TT_PRIVACY = { PUBLIC_TO_EVERYONE: "Everyone", MUTUAL_FOLLOW_FRIENDS: "Friends", FOLLOWER_OF_CREATOR: "Followers", SELF_ONLY: "Only me" };
+
+async function openPost(clip) {
+  const m = $("#postModal"), body = $("#pmBody");
+  m.hidden = false;
+  body.innerHTML = `<div class="spin" style="margin-top:20px"></div>`;
+  let o;
+  try { o = await api("/api/social"); } catch (e) { body.innerHTML = `<div class="banner warn">${esc(e.message)}</div>`; return; }
+  if (!o.allowed) { body.innerHTML = `<p class="small" style="margin-top:12px">Publishing and scheduling are included in the Starter plan and above.</p><button type="button" class="btn btn-primary btn-sm" id="pmUp">See plans</button>`; $("#pmUp").onclick = () => { m.hidden = true; openSettings("plan"); }; return; }
+  if (!o.connections.length) { body.innerHTML = `<p class="small" style="margin-top:12px">Connect a TikTok, Instagram, YouTube or X account first.</p><button type="button" class="btn btn-primary btn-sm" id="pmCon">Connect accounts</button>`; $("#pmCon").onclick = () => { m.hidden = true; openSettings("social"); }; return; }
+  const caps = clip.captions || {};
+  const capFor = (p) => p === "youtube" ? (caps.youtube || clip.hook || "") : (caps[p] || caps.tiktok || clip.hook || "");
+  const tooLong = (p) => { const lim = o.platforms.find((x) => x.key === p)?.max_seconds; return lim && (clip.duration || 0) > lim ? lim : 0; };
+  body.innerHTML = `
+    <p class="small">“${esc(clip.hook || clip.title)}” · ${Math.round(clip.duration || 0)}s</p>
+    ${o.connections.map((c) => `<div class="brand-edit" data-conn="${esc(c.id)}" data-platform="${esc(c.platform)}" style="margin-top:10px">
+      <label class="toggle" style="justify-content:flex-start;gap:10px"><input type="checkbox" class="pm-on" ${tooLong(c.platform) ? "disabled" : "checked"}>
+        <b>${PLATFORM_ICON[c.platform]} ${esc(c.account_name)}</b>${tooLong(c.platform) ? `<span class="small"> · clips over ${tooLong(c.platform)}s can't be posted here</span>` : ""}</label>
+      ${c.platform === "youtube" ? `<input type="text" class="pm-title" maxlength="100" placeholder="Title" value="${esc((caps.youtube || clip.title || "").slice(0, 100))}">` : ""}
+      <textarea class="pm-cap" maxlength="${c.platform === "x" ? 280 : 2200}">${esc(capFor(c.platform))}</textarea>
+      ${c.platform === "x" ? `<div class="small pm-count"></div>` : ""}
+      ${c.platform === "tiktok" ? `<div class="row"><select class="pm-privacy"><option>Loading privacy options…</option></select></div>` : ""}
+    </div>`).join("")}
+    <label class="f">When</label>
+    <div class="row">
+      <select id="pmWhen"><option value="now">Post now</option><option value="later">Schedule</option></select>
+      <input type="datetime-local" id="pmAt" hidden>
+    </div>
+    <button type="button" class="btn btn-primary" id="pmGo" style="width:100%;margin-top:14px">Post now</button>`;
+  body.querySelectorAll('[data-platform="x"] .pm-cap').forEach((t) => {
+    const upd = () => { t.parentElement.querySelector(".pm-count").textContent = `${t.value.length} / 280`; };
+    t.oninput = upd; upd();
+  });
+  body.querySelectorAll('[data-platform="tiktok"]').forEach(async (box) => {
+    const sel = box.querySelector(".pm-privacy");
+    try {
+      const t = await api(`/api/social/connections/${box.dataset.conn}/tiktok`);
+      sel.innerHTML = t.privacy_level_options.map((v) => `<option value="${esc(v)}">Who can watch: ${esc(TT_PRIVACY[v] || v)}</option>`).join("");
+    } catch (e) { sel.innerHTML = `<option value="">${esc(e.message)}</option>`; }
+  });
+  const now = new Date(Date.now() + 3600e3);
+  now.setMinutes(0, 0, 0);
+  const pad = (n) => String(n).padStart(2, "0");
+  $("#pmAt").value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  $("#pmWhen").onchange = () => {
+    const later = $("#pmWhen").value === "later";
+    $("#pmAt").hidden = !later; $("#pmGo").textContent = later ? "Schedule" : "Post now";
+  };
+  $("#pmGo").onclick = async () => {
+    const items = [];
+    body.querySelectorAll("[data-conn]").forEach((box) => {
+      if (!box.querySelector(".pm-on").checked) return;
+      const it = { connection_id: box.dataset.conn, caption: box.querySelector(".pm-cap").value };
+      const title = box.querySelector(".pm-title"); if (title) it.title = title.value;
+      const priv = box.querySelector(".pm-privacy"); if (priv && priv.value) it.options = { privacy: priv.value };
+      items.push(it);
+    });
+    if (!items.length) { toast("Choose at least one account."); return; }
+    const payload = { job_id: state.jobId, clip_id: clip.id, items };
+    if ($("#pmWhen").value === "later") {
+      const t = new Date($("#pmAt").value).getTime();  // local time -> UTC
+      if (!t || t < Date.now()) { toast("Pick a time in the future."); return; }
+      payload.scheduled_at = t / 1000;
+    }
+    $("#pmGo").disabled = true;
+    try {
+      await api("/api/posts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      m.hidden = true;
+      toast(payload.scheduled_at ? "Scheduled" : "Posting… check Settings › Social & posts");
+    } catch (e) { toast(e.message); $("#pmGo").disabled = false; }
+  };
 }
 
 async function drawTeamTab(body) {
@@ -597,6 +710,7 @@ function makeCard(c) {
         <a class="btn btn-primary btn-sm dl">⬇ MP4</a>
         <a class="btn btn-ghost btn-sm srt">SRT</a>
         <button class="btn btn-ghost btn-sm edit">✎ Edit</button>
+        <button class="btn btn-ghost btn-sm post">📤 Post</button>
       </div>
       <div class="editbox">
         <label class="f" style="margin-top:0">Hook headline</label>
@@ -641,6 +755,7 @@ function makeCard(c) {
     try { await navigator.clipboard.writeText($(".captext", el).textContent); toast("Caption copied"); }
     catch { toast("Copy failed: select the text manually"); }
   };
+  $(".post", el).onclick = () => openPost(card.clip);
   $(".edit", el).onclick = () => {
     const box = $(".editbox", el);
     const open = !box.classList.contains("open");

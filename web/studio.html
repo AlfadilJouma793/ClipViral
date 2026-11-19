@@ -129,12 +129,22 @@
       <h2 id="stTitle">Settings</h2>
       <button type="button" class="btn btn-ghost btn-sm" id="stClose" style="flex:0 0 auto">Close</button>
     </div>
-    <div class="seg" style="grid-template-columns:repeat(3,1fr);margin-top:10px">
+    <div class="seg" style="grid-template-columns:repeat(4,1fr);margin-top:10px">
       <button type="button" class="on" data-tab="plan">Plan &amp; billing</button>
+      <button type="button" data-tab="social">Social &amp; posts</button>
       <button type="button" data-tab="team">Team</button>
       <button type="button" data-tab="api">API keys</button>
     </div>
     <div id="stBody"></div>
+  </div>
+</div>
+<div class="modal-bg" id="postModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pmTitle">
+    <div class="row" style="justify-content:space-between">
+      <h2 id="pmTitle">Post this clip</h2>
+      <button type="button" class="btn btn-ghost btn-sm" id="pmClose" style="flex:0 0 auto">Close</button>
+    </div>
+    <div id="pmBody"></div>
   </div>
 </div>
 <div class="modal-bg" id="brandModal" hidden>

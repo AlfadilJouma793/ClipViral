@@ -16,12 +16,12 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import accounts, billing, brands, config, jobs
+from . import accounts, billing, brands, config, jobs, social
 from .pipeline import broll, fetch, render
 from .pipeline.captions import STYLES
 from .pipeline.niches import public_niches
@@ -37,12 +37,14 @@ ASPECT_LABELS = {"9:16": "9:16 vertical (TikTok, Reels, Shorts)", "1:1": "1:1 sq
 
 COOKIE = "cv_session"
 accounts.init()
+social.init()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     accounts.init()
     jobs.start_workers()
+    social.start_scheduler()
     yield
 
 
@@ -292,6 +294,116 @@ async def stripe_webhook(request: Request):
         logging.getLogger("clipviral.billing").warning("webhook rejected: %s", exc)
         raise HTTPException(400, "Invalid webhook")
     return {"received": etype}
+
+
+# --------------------------------------------------------------------------- social publishing
+def _need_scheduler(c: dict) -> None:
+    if not accounts.plan_of(_ws(c))["scheduler"]:
+        raise HTTPException(402, "Publishing and scheduling are included in the Starter plan and above.")
+
+
+@app.get("/api/social")
+def social_overview(c: dict = Depends(ctx)):
+    return {"allowed": accounts.plan_of(_ws(c))["scheduler"],
+            "platforms": [{"key": p.key, "label": p.label, "configured": p.configured(), "max_seconds": p.max_seconds}
+                          for p in social.PROVIDERS.values()],
+            "connections": social.connections(_ws(c))}
+
+
+def _redirect_uri(request: Request, platform: str) -> str:
+    return f"{billing.public_url(str(request.base_url))}/api/social/callback/{platform}"
+
+
+@app.post("/api/social/connect/{platform}")
+def social_connect(platform: str, request: Request, c: dict = Depends(user_ctx)):
+    _need_scheduler(c)
+    try:
+        return {"url": social.start_connect(platform, _ws(c), c["user"]["id"], _redirect_uri(request, platform))}
+    except social.SocialError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/social/callback/{platform}")
+def social_callback(platform: str, request: Request, code: str = "", state: str = "", error: str = "",
+                    error_description: str = ""):
+    from urllib.parse import quote
+    if platform not in social.PROVIDERS:
+        raise HTTPException(404)
+    if error or not code:
+        msg = error_description or error or "Sign-in was cancelled."
+        return RedirectResponse(f"/studio?social_error={quote(msg[:200])}", status_code=303)
+    try:
+        social.finish_connect(platform, state, code, _redirect_uri(request, platform))
+    except social.SocialError as exc:
+        return RedirectResponse(f"/studio?social_error={quote(str(exc)[:200])}", status_code=303)
+    return RedirectResponse(f"/studio?connected={platform}", status_code=303)
+
+
+@app.delete("/api/social/connections/{cid}")
+def social_disconnect(cid: str, c: dict = Depends(user_ctx)):
+    social.disconnect(_ws(c), cid)
+    return {"ok": True}
+
+
+@app.get("/api/social/connections/{cid}/tiktok")
+def social_tiktok_options(cid: str, c: dict = Depends(ctx)):
+    try:
+        return social.tiktok_options(_ws(c), cid)
+    except social.SocialError as exc:
+        raise HTTPException(400, str(exc))
+
+
+class PostItem(BaseModel):
+    connection_id: str
+    caption: str = ""
+    title: Optional[str] = None
+    options: Optional[dict] = None
+
+
+class PostIn(BaseModel):
+    job_id: str
+    clip_id: str
+    items: List[PostItem]
+    scheduled_at: Optional[float] = None  # unix seconds (UTC); omit to post now
+
+
+@app.post("/api/posts")
+def create_posts(body: PostIn, c: dict = Depends(ctx)):
+    _need_scheduler(c)
+    _job(body.job_id, c)
+    if not body.items:
+        raise HTTPException(400, "Choose at least one account.")
+    try:
+        posts = social.schedule(_ws(c), (c.get("user") or {}).get("id"), body.job_id, _safe(body.clip_id),
+                                [i.model_dump() for i in body.items], body.scheduled_at)
+    except social.SocialError as exc:
+        raise HTTPException(400, str(exc))
+    return {"posts": posts}
+
+
+@app.get("/api/posts")
+def get_posts(c: dict = Depends(ctx)):
+    return {"posts": social.list_posts(_ws(c))}
+
+
+@app.delete("/api/posts/{post_id}")
+def cancel_post(post_id: str, c: dict = Depends(ctx)):
+    if not social.cancel(_ws(c), post_id):
+        raise HTTPException(400, "Only scheduled posts that haven't started can be cancelled.")
+    return {"ok": True}
+
+
+@app.get("/media/{token}.mp4")
+def public_media(token: str):
+    """Short-lived signed link so platforms like Instagram can fetch a clip."""
+    got = social.verify_media(token)
+    if not got:
+        raise HTTPException(404)
+    job_id, clip_id = got
+    p = jobs.job_dir(_safe(job_id)) / f"{_safe(clip_id)}.mp4"
+    if not p.exists():
+        raise HTTPException(404)
+    return FileResponse(p, media_type="video/mp4")
 
 
 # --------------------------------------------------------------------------- API keys

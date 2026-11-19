@@ -180,9 +180,10 @@ label.f { display: block; font-size: 12px; font-weight: 600; color: var(--muted)
 .chip.on { background: var(--amber); color: #17130a; border-color: var(--amber); font-weight: 600; }
 .row { display: flex; gap: 10px; align-items: center; }
 .row > * { flex: 1; }
-input[type=text], input[type=number], select, textarea { width: 100%; background: var(--bg-2); border: 1px solid var(--line);
+input[type=text], input[type=number], input[type=email], input[type=password], input[type=datetime-local], select, textarea { width: 100%; background: var(--bg-2); border: 1px solid var(--line);
   border-radius: 10px; padding: 10px 12px; font-size: 14px; outline: none; }
 input:focus, select:focus, textarea:focus { border-color: var(--amber); }
+input[type=datetime-local] { color-scheme: dark; }
 textarea { resize: vertical; min-height: 64px; }
 input[type=range] { width: 100%; accent-color: var(--amber); }
 input[type=color] { width: 44px; height: 38px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); padding: 3px; flex: 0 0 44px; }
