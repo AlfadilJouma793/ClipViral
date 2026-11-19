@@ -16,8 +16,10 @@ Upload → transcribe every word → find the best moments → reframe to 9:16 a
 | **Dead-air removal** | Long pauses inside a clip are cut and the captions re-timed. |
 | **Niche presets** | Podcasters, YouTubers, **UK property agents** (stamp duty, EPC, chains; compliance-safe hooks), coaches, agencies. You can also tell the AI what to look for. |
 | **5 caption styles** | Bold Pop, Karaoke, Boxed, Minimal, Neon. Word-by-word highlighting, keyword emphasis, brand colour, @handle watermark, progress bar. |
-| **Post copy included** | A TikTok caption, Instagram caption and YouTube Shorts title with hashtags for each clip. SRT per clip, and a ZIP export with everything. |
+| **Post copy included** | A TikTok caption, Instagram caption, YouTube Shorts title and X post for each clip. SRT per clip, and a ZIP export with everything. |
 | **Platform audio** | Loudness normalised to −14 LUFS. |
+| **Paste a link** | Import from YouTube, Vimeo, TikTok, Instagram, X, Facebook, Twitch, Dropbox or any direct video URL (yt-dlp, up to 1080p, length-capped, private-network links blocked, rights confirmation required). |
+| **Platform presets** | TikTok, Instagram Reels and X modes tune the AI's picks, clip length, caption style and post copy to each platform. |
 | **Bring your own transcript** | Upload an SRT/VTT to skip transcription or fix names. |
 | **Works without AI** | With no API key, a built-in scorer ranks moments on hook words, vocal energy, pace, payoff and niche keywords. |
 

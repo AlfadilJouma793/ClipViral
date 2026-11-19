@@ -57,6 +57,9 @@ if [ ! -f .venv/.installed ] || [ requirements.txt -nt .venv/.installed ]; then
   touch .venv/.installed
 fi
 
+# Keep the link downloader current (sites like YouTube change often)
+.venv/bin/python -m pip install -q -U "yt-dlp[default]" >/dev/null 2>&1 || true
+
 # 4. API key (optional)
 if [ ! -f .env ]; then
   cp .env.example .env

@@ -75,7 +75,7 @@ def test_claude_plan_maps_sentence_ranges_to_times(monkeypatch, words):
         start_sentence=0, end_sentence=1, title="EPC mistake", hook="The EPC mistake", virality=91,
         scores=highlights.Scores(hook=90, flow=85, value=88, trend=70), why="Clear mistake + payoff.",
         emphasis_words=["EPC"], hashtags=["#ukproperty", "epc"],
-        captions=highlights.PlatformCaptions(tiktok="t", instagram="i", youtube="y #shorts"))
+        captions=highlights.PlatformCaptions(tiktok="t", instagram="i", youtube="y #shorts", x="x post"))
     captured = {}
 
     class FakeMessages:
@@ -158,3 +158,78 @@ def test_render_clip_end_to_end(tmp_path, words):
     assert probe.stdout.strip() == f"{config.OUT_W},{config.OUT_H}"
     assert info["layout_used"] == "fit"  # no faces in a test pattern
     assert info["tightened_by"] > 1.0  # the 2.5s gap in the SRT was tightened
+
+
+# ---------------------------------------------------------------- link import
+def test_validate_url_rejects_bad_and_private_links(monkeypatch):
+    from clipviral.pipeline import fetch
+    monkeypatch.delenv("CLIPVIRAL_ALLOW_PRIVATE_URLS", raising=False)
+    for bad in ("", "ftp://example.com/a.mp4", "youtube.com/watch?v=x", "http://127.0.0.1:8000/x.mp4",
+                "http://localhost/x.mp4", "http://169.254.169.254/latest/meta-data", "http://10.0.0.5/v.mp4"):
+        with pytest.raises(fetch.LinkError):
+            fetch.validate_url(bad)
+
+
+def test_download_from_link_end_to_end(tmp_path, monkeypatch):
+    """Serve a real video over HTTP and import it through yt-dlp's generic extractor."""
+    import functools
+    import http.server
+    import threading
+
+    from clipviral.pipeline import fetch
+    srv_dir = tmp_path / "srv"
+    srv_dir.mkdir()
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25",
+                    "-f", "lavfi", "-i", "sine=frequency=300", "-t", "6", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", str(srv_dir / "talk.mp4")], check=True)
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(srv_dir))
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("CLIPVIRAL_ALLOW_PRIVATE_URLS", "1")
+        out = tmp_path / "job"
+        out.mkdir()
+        seen = []
+        got = fetch.download(f"http://127.0.0.1:{httpd.server_port}/talk.mp4", out, on_progress=seen.append)
+        assert got["path"].exists() and got["path"].stat().st_size > 10_000
+        assert got["path"].name.startswith("source.")
+
+        # too long -> friendly error, nothing left behind
+        monkeypatch.setattr(config, "MAX_VIDEO_SECONDS", 3)
+        out2 = tmp_path / "job2"
+        out2.mkdir()
+        with pytest.raises(fetch.LinkError, match="limit"):
+            fetch.download(f"http://127.0.0.1:{httpd.server_port}/talk.mp4", out2)
+
+        with pytest.raises(fetch.LinkError):
+            fetch.download(f"http://127.0.0.1:{httpd.server_port}/missing.mp4", tmp_path)
+    finally:
+        httpd.shutdown()
+
+
+def test_api_link_job_requires_rights_and_valid_link(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    from clipviral import jobs, main
+    monkeypatch.setattr(config, "JOBS_DIR", tmp_path)
+    monkeypatch.setattr(jobs, "enqueue", lambda *a, **k: None)
+    monkeypatch.delenv("CLIPVIRAL_ALLOW_PRIVATE_URLS", raising=False)
+    c = TestClient(main.app)
+    r = c.post("/api/jobs", data={"url": "https://example.com/v.mp4"})
+    assert r.status_code == 400 and "permission" in r.json()["detail"]
+    r = c.post("/api/jobs", data={"url": "http://127.0.0.1/v.mp4", "rights": "true"})
+    assert r.status_code == 400 and "private" in r.json()["detail"]
+    r = c.post("/api/jobs", data={})
+    assert r.status_code == 400
+    monkeypatch.setattr(main.fetch, "validate_url", lambda u: u)
+    r = c.post("/api/jobs", data={"url": "https://www.youtube.com/watch?v=abc", "rights": "true", "niche": "x"})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["url"].endswith("v=abc") and j["step"] == "download" and j["options"]["niche"] == "x"
+    assert j["name"] == "www.youtube.com"
+
+
+def test_new_platform_presets_exist():
+    from clipviral.pipeline.niches import NICHES, public_niches
+    keys = {n["key"] for n in public_niches()}
+    assert {"tiktok", "instagram", "x"} <= keys
+    assert NICHES["x"]["lengths"] == [30, 90]

@@ -21,6 +21,18 @@
   <aside class="side">
     <form class="panel" id="newForm">
       <h2>New project</h2>
+      <div class="seg" role="tablist">
+        <button type="button" class="on" data-src="file" role="tab">⬆ Upload file</button>
+        <button type="button" data-src="link" role="tab">🔗 Paste link</button>
+      </div>
+      <div id="linkBox" hidden>
+        <input type="url" id="url" placeholder="https://youtube.com/watch?v=…" autocomplete="off" inputmode="url">
+        <div class="small" style="margin-top:8px">YouTube, Vimeo, TikTok, Instagram, X, Facebook, Twitch, Dropbox, or any direct video link. Up to <span id="maxmin">180</span> minutes.</div>
+        <label class="toggle" style="align-items:flex-start;gap:10px;justify-content:flex-start">
+          <input type="checkbox" id="rights" style="margin-top:2px;flex:0 0 18px">
+          <span style="font-size:13px;color:var(--muted)">I own this video or have permission to repurpose it.</span>
+        </label>
+      </div>
       <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose a video file">
         <b>Drop your long video here</b>
         <span>MP4, MOV, MKV, WEBM · up to <span id="maxgb">8</span> GB</span>

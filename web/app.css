@@ -113,7 +113,7 @@ h2 { font-family: var(--display); font-size: clamp(30px, 4vw, 46px); letter-spac
 .feature p { margin: 0; color: var(--muted); line-height: 1.55; font-size: 15px; }
 .feature.wide { grid-column: span 2; }
 
-.niches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+.niches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .niche { border-radius: var(--radius); padding: 22px; background: var(--card); border: 1px solid var(--line); }
 .niche b { display: block; font-size: 16px; margin-bottom: 8px; }
 .niche span { color: var(--muted); font-size: 14px; line-height: 1.5; }
@@ -259,3 +259,15 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 14px; ma
   .side { position: static; max-height: none; }
   .stepper { grid-template-columns: repeat(5, minmax(0,1fr)); }
 }
+
+/* upload source switch */
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 12px; padding: 4px; margin-bottom: 12px; }
+.seg button { border: 0; background: transparent; color: var(--muted); padding: 9px 8px; border-radius: 9px; font-size: 14px;
+  font-weight: 600; cursor: pointer; }
+.seg button.on { background: var(--card-2); color: var(--text); box-shadow: 0 1px 0 rgba(255,255,255,.06) inset; }
+input[type=url] { width: 100%; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+  font-size: 14px; outline: none; }
+input[type=url]:focus { border-color: var(--amber); }
+.source-link { font-size: 12px; color: var(--dim); word-break: break-all; }
+.source-link a { color: var(--muted); }

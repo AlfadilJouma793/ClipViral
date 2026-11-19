@@ -12,13 +12,16 @@ import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config, jobs
+from .pipeline import fetch
 from .pipeline.captions import STYLES
 from .pipeline.niches import public_niches
 
@@ -56,15 +59,23 @@ def get_config():
         whisper = True
     except Exception:
         whisper = False
+    try:
+        import yt_dlp  # noqa: F401
+        links = True
+    except Exception:
+        links = False
     return {"niches": public_niches(), "styles": STYLES, "layouts": LAYOUTS,
-            "ai": config.ai_available(), "whisper": whisper,
+            "ai": config.ai_available(), "whisper": whisper, "links": links,
+            "max_video_minutes": config.MAX_VIDEO_SECONDS // 60,
             "whisper_model": config.WHISPER_MODEL,
             "max_upload_gb": round(config.MAX_UPLOAD_BYTES / 1024**3, 1)}
 
 
 @app.post("/api/jobs")
 async def create_job(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    url: str = Form(""),
+    rights: bool = Form(False),
     transcript: Optional[UploadFile] = File(None),
     niche: str = Form("general"),
     num_clips: int = Form(8),
@@ -81,9 +92,21 @@ async def create_job(
     language: str = Form(""),
     prompt: str = Form(""),
 ):
-    ext = Path(file.filename or "").suffix.lower()
-    if ext not in VIDEO_EXT:
-        raise HTTPException(400, f"Unsupported file type {ext or '?'}. Upload MP4, MOV, MKV, WEBM or AVI.")
+    has_file = file is not None and bool(file.filename)
+    url = url.strip()
+    if has_file == bool(url):
+        raise HTTPException(400, "Upload a video file or paste a link (one of the two).")
+    if has_file:
+        ext = Path(file.filename or "").suffix.lower()
+        if ext not in VIDEO_EXT:
+            raise HTTPException(400, f"Unsupported file type {ext or '?'}. Upload MP4, MOV, MKV, WEBM or AVI.")
+    else:
+        if not rights:
+            raise HTTPException(400, "Please confirm you own this video or have permission to use it.")
+        try:
+            url = await run_in_threadpool(fetch.validate_url, url)
+        except fetch.LinkError as exc:
+            raise HTTPException(400, str(exc))
     if style and style not in STYLES:
         raise HTTPException(400, "Unknown caption style")
     if layout and layout not in LAYOUTS:
@@ -94,12 +117,19 @@ async def create_job(
     min_len = max(5, min(170, min_len))
     max_len = max(min_len + 5, min(180, max_len))
 
-    name = Path(file.filename or "video").stem[:80]
+    name = Path(file.filename or "video").stem[:80] if has_file else (urlparse(url).hostname or "link")
     job = jobs.create(name, dict(niche=niche, num_clips=num_clips, min_len=min_len, max_len=max_len,
                                  style=style, layout=layout, accent=accent, position=position,
                                  tighten=tighten, progress_bar=progress_bar, show_hook=show_hook,
                                  watermark=watermark, language=language, prompt=prompt))
     d = jobs.job_dir(job["id"])
+    if not has_file:
+        if transcript is not None and transcript.filename:
+            text = (await transcript.read())[:20_000_000]
+            (d / f"sidecar{Path(transcript.filename).suffix.lower() or '.srt'}").write_bytes(text)
+        jobs.update(job["id"], url=url, source=None, status="queued", step="download", progress=0)
+        jobs.enqueue(job["id"])
+        return jobs.load(job["id"])
     dst = d / f"source{ext}"
     size = 0
     try:
@@ -215,7 +245,8 @@ def export_zip(job_id: str):
             posts.append(f"## {c['rank']}. {c['title']}  (score {c['virality']})\n"
                          f"Hook: {c['hook']}\nWhy: {c['why']}\n\n"
                          f"TikTok:\n{cap.get('tiktok', '')}\n\nInstagram:\n{cap.get('instagram', '')}\n\n"
-                         f"YouTube Shorts:\n{cap.get('youtube', '')}\n")
+                         f"YouTube Shorts:\n{cap.get('youtube', '')}\n\n"
+                         f"X (Twitter):\n{cap.get('x', '')}\n")
         z.writestr("POST-CAPTIONS.md", f"# {job['name']}\n\n" + "\n---\n\n".join(posts))
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/zip",

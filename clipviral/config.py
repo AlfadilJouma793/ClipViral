@@ -44,6 +44,8 @@ X264_CRF = os.environ.get("CLIPVIRAL_X264_CRF", "20")
 WORKERS = int(os.environ.get("CLIPVIRAL_WORKERS", "1"))
 
 MAX_UPLOAD_BYTES = int(float(os.environ.get("CLIPVIRAL_MAX_UPLOAD_GB", "8")) * 1024**3)
+# Longest video accepted from a pasted link (seconds). Default 3 hours.
+MAX_VIDEO_SECONDS = int(float(os.environ.get("CLIPVIRAL_MAX_VIDEO_MINUTES", "180")) * 60)
 
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 
 from . import config
-from .pipeline import highlights, media, render, transcribe
+from .pipeline import fetch, highlights, media, render, transcribe
 from .pipeline.niches import get_niche
 
 log = logging.getLogger("clipviral.jobs")
@@ -22,6 +22,7 @@ _q: "queue.Queue[tuple[str, str, str | None]]" = queue.Queue()
 
 STEPS = [
     ("upload", "Uploaded"),
+    ("download", "Downloading video"),
     ("probe", "Reading video"),
     ("transcribe", "Transcribing every word"),
     ("analyze", "Finding viral moments"),
@@ -118,16 +119,25 @@ def process(job_id: str) -> None:
     d = job_dir(job_id)
     job = load(job_id)
     opts = job["options"]
+
+    if not job.get("source"):  # imported from a link
+        _set(job_id, "download", 1)
+        for stale in d.glob("source.*"):
+            stale.unlink()
+        got = fetch.download(job["url"], d, on_progress=lambda f: _set(job_id, "download", 1 + 14 * f))
+        job = update(job_id, source=got["path"].name, name=got["title"] or job["name"],
+                     size_bytes=got["path"].stat().st_size, platform=got["extractor"])
     src = d / job["source"]
 
-    _set(job_id, "probe", 3)
+    _set(job_id, "probe", 16 if job.get("url") else 3)
     meta = media.probe(src)
     update(job_id, meta=meta, duration=meta["duration"])
 
     # transcript
     tpath = d / "transcript.json"
     if not tpath.exists():
-        _set(job_id, "transcribe", 5)
+        t0 = 17 if job.get("url") else 5
+        _set(job_id, "transcribe", t0)
         sidecar = next(iter(d.glob("sidecar.*")), None)
         if sidecar is not None:
             tr = transcribe.parse_subtitles(sidecar.read_text(errors="ignore"))
@@ -136,7 +146,7 @@ def process(job_id: str) -> None:
             media.extract_audio(src, wav)
             tr = transcribe.whisper_transcribe(
                 wav, meta["duration"], opts.get("language"),
-                on_progress=lambda f: _set(job_id, "transcribe", 5 + 45 * f))
+                on_progress=lambda f: _set(job_id, "transcribe", t0 + (50 - t0) * f))
         else:
             raise RuntimeError("This video has no audio track, so there is nothing to transcribe.")
         tpath.write_text(json.dumps(tr))

@@ -31,6 +31,7 @@ class PlatformCaptions(BaseModel):
     tiktok: str = Field(description="TikTok caption, <=150 chars, conversational, 3-5 hashtags at end")
     instagram: str = Field(description="Instagram Reels caption: 1-3 short lines + call to action + hashtags")
     youtube: str = Field(description="YouTube Shorts title, <=90 chars, include #shorts")
+    x: str = Field(description="X (Twitter) post text, <=260 chars, sharp and quotable, at most 2 hashtags")
 
 
 class Scores(BaseModel):
@@ -173,6 +174,13 @@ _FILLER = re.compile(r"^(um+|uh+|erm+|hmm+|ah+|like,?|you know,?)$", re.I)
 _NUM = re.compile(r"(\d|£|\$|%|percent|thousand|million|half|double|twice)", re.I)
 
 
+# Words that work as hook signals but make useless hashtags.
+_GENERIC_TAGS = _HOOK_WORDS | {"story", "honestly", "literally", "watch", "wait", "think", "problem",
+                               "first", "simple", "start", "lesson", "love", "life", "favourite",
+                               "favorite", "opinion", "unpopular", "changed", "realised", "realized",
+                               "tried", "finally", "result", "results", "step", "rule", "clients"}
+
+
 def _norm(w: str) -> str:
     return re.sub(r"[^\w£$%']", "", w.lower())
 
@@ -267,7 +275,8 @@ def heuristic_plan(sents: list[dict], words: list[dict], curve: np.ndarray, nich
         virality = int(round(55 + 40 * rel * min(1.0, 0.6 + score)))
         text = " ".join(s["text"] for s in sents[a:b + 1])
         emph = _pick_emphasis(text, kw)
-        topic_tags = [re.sub(r"[^a-z0-9]", "", k) for k in kw if k in text.lower() and len(k) > 3]
+        topic_tags = [re.sub(r"[^a-z0-9]", "", k) for k in kw
+                      if k in text.lower() and len(k) > 3 and k not in _GENERIC_TAGS]
         tags = list(dict.fromkeys(niche["hashtags"] + [t for t in topic_tags if t]))[:6]
         hook_text = _make_hook(first)
         out.append({
@@ -323,6 +332,7 @@ def _captions(hook: str, first: str, tags: list[str]) -> dict:
         "tiktok": f"{clean} 👀 {hs}"[:150],
         "instagram": f"{clean}\n\nSave this for later and share it with someone who needs it.\n\n{hs}",
         "youtube": f"{clean[:78]} #shorts",
+        "x": f"{clean} {' '.join('#' + t for t in tags[:2])}"[:260],
     }
 
 

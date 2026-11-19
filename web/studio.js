@@ -3,7 +3,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 
-const state = { cfg: null, niche: "general", style: "", lengths: [20, 60], file: null, jobId: null, poll: null, cards: new Map(), job: null };
+const state = { cfg: null, src: "file", niche: "general", style: "", lengths: [20, 60], file: null, jobId: null, poll: null, cards: new Map(), job: null };
 
 function toast(msg) {
   const t = $("#toast");
@@ -27,6 +27,7 @@ async function api(path, opts = {}) {
 async function init() {
   state.cfg = await api("/api/config");
   $("#maxgb").textContent = state.cfg.max_upload_gb;
+  $("#maxmin").textContent = state.cfg.max_video_minutes;
 
   const nEl = $("#niches");
   state.cfg.niches.forEach((n) => {
@@ -37,6 +38,11 @@ async function init() {
       state.niche = n.key;
       nEl.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === b));
       selectStyle(n.style);
+      if (n.lengths) {
+        const want = n.lengths.join(",");
+        const chip = [...$("#lengths").querySelectorAll(".chip")].find((c) => c.dataset.v === want);
+        if (chip) chip.click();
+      }
     };
     nEl.appendChild(b);
   });
@@ -68,6 +74,18 @@ async function init() {
   drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); setFile(e.dataTransfer.files[0]); };
   $("#newForm").onsubmit = (e) => { e.preventDefault(); upload(); };
 
+  document.querySelectorAll(".seg button").forEach((b) => b.onclick = () => setSource(b.dataset.src));
+  $("#url").oninput = updateGo;
+  $("#rights").onchange = updateGo;
+  if (!state.cfg.links) $('.seg [data-src="link"]').title = "Link import isn't installed on this server";
+  // Pasting a link anywhere on the page switches to link mode.
+  document.addEventListener("paste", (e) => {
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+    const text = (e.clipboardData?.getData("text") || "").trim();
+    if (/^https?:\/\/\S+$/i.test(text)) { setSource("link"); $("#url").value = text; updateGo(); $("#rights").focus(); }
+  });
+
   banners();
   await loadProjects();
   const want = location.hash.slice(1);
@@ -90,17 +108,38 @@ function selectStyle(k) {
   $("#styles").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.key === k));
 }
 
+function setSource(src) {
+  state.src = src;
+  document.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b.dataset.src === src));
+  $("#linkBox").hidden = src !== "link";
+  $("#drop").hidden = src !== "file";
+  if (src === "link") $("#url").focus();
+  updateGo();
+}
+
+const validUrl = (u) => /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(u.trim());
+
+function updateGo() {
+  $("#go").disabled = state.src === "file" ? !state.file : !(validUrl($("#url").value) && $("#rights").checked);
+}
+
 function setFile(f) {
   if (!f) return;
   state.file = f;
   $("#fileName").textContent = `${f.name} · ${(f.size / 1024 / 1024).toFixed(0)} MB`;
-  $("#go").disabled = false;
+  updateGo();
 }
 
 function upload() {
-  if (!state.file) return;
+  const linkMode = state.src === "link";
+  if (linkMode ? !validUrl($("#url").value) : !state.file) return;
   const fd = new FormData();
-  fd.append("file", state.file);
+  if (linkMode) {
+    fd.append("url", $("#url").value.trim());
+    fd.append("rights", $("#rights").checked);
+  } else {
+    fd.append("file", state.file);
+  }
   const tr = $("#transcript").files[0];
   if (tr) fd.append("transcript", tr);
   fd.append("niche", state.niche);
@@ -119,7 +158,8 @@ function upload() {
   fd.append("progress_bar", $("#progressBar").checked);
 
   const bar = $("#upbar"), go = $("#go"), msg = $("#upmsg");
-  bar.style.display = "block"; go.disabled = true; msg.textContent = "Uploading…";
+  bar.style.display = linkMode ? "none" : "block"; go.disabled = true;
+  msg.textContent = linkMode ? "Checking link…" : "Uploading…";
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/jobs");
   xhr.upload.onprogress = (e) => {
@@ -134,13 +174,15 @@ function upload() {
     if (xhr.status >= 200 && xhr.status < 300) {
       const job = JSON.parse(xhr.responseText);
       msg.textContent = "";
-      state.file = null; $("#file").value = ""; $("#fileName").textContent = "";
+      if (linkMode) { $("#url").value = ""; $("#rights").checked = false; }
+      else { state.file = null; $("#file").value = ""; $("#fileName").textContent = ""; }
+      updateGo();
       await loadProjects();
       openJob(job.id);
     } else {
       let d = xhr.statusText;
       try { d = JSON.parse(xhr.responseText).detail; } catch {}
-      msg.textContent = "Upload failed: " + d;
+      msg.textContent = (linkMode ? "" : "Upload failed: ") + d;
       go.disabled = false;
     }
   };
@@ -180,7 +222,7 @@ async function openJob(id) {
   state.poll = setInterval(refresh, 2000);
 }
 
-const STEPS = [["probe", "Reading video"], ["transcribe", "Transcribing"], ["analyze", "Finding moments"], ["render", "Rendering clips"], ["done", "Ready"]];
+const STEPS = [["download", "Downloading"], ["probe", "Reading video"], ["transcribe", "Transcribing"], ["analyze", "Finding moments"], ["render", "Rendering clips"], ["done", "Ready"]];
 
 async function refresh(first = false) {
   const id = state.jobId;
@@ -197,7 +239,7 @@ async function refresh(first = false) {
   if (first || !box.querySelector(".job-head")) {
     box.innerHTML = `
       <div class="job-head">
-        <div><h1 id="jt"></h1><div class="sub" id="jsub"></div></div>
+        <div style="min-width:0"><h1 id="jt"></h1><div class="sub" id="jsub"></div><div class="source-link" id="jlink"></div></div>
         <div class="actions">
           <a class="btn btn-primary btn-sm" id="zip" href="/api/jobs/${esc(id)}/export.zip">⬇ Download all (ZIP)</a>
           <button class="btn btn-ghost btn-sm" id="del">Delete</button>
@@ -214,17 +256,20 @@ async function refresh(first = false) {
       loadProjects();
     };
   }
+  $("#jt").textContent = job.name;
   const niche = state.cfg.niches.find((n) => n.key === job.niche);
   const engine = job.engine === "claude" ? "AI picks" : job.engine === "signals" ? "Signal scoring" : "";
+  $("#jlink").innerHTML = job.url ? `Source: <a href="${esc(job.url)}" target="_blank" rel="noopener noreferrer">${esc(job.url)}</a>` : "";
   $("#jsub").textContent = [niche?.label, job.duration ? fmt(job.duration) + " source" : "", engine, job.transcript_source === "uploaded-transcript" ? "Your transcript" : ""].filter(Boolean).join(" · ");
 
   const st = $("#status");
   if (job.status === "error") {
     st.innerHTML = `<div class="banner warn"><b>Something went wrong.</b> ${esc(job.error)}</div>`;
   } else if (job.status !== "done") {
-    const idx = STEPS.findIndex(([k]) => k === job.step);
-    st.innerHTML = `<div class="progress-big">${esc(STEPS[Math.max(0, idx)]?.[1] || "Queued")}… ${Math.round(job.progress || 0)}%</div>
-      <div class="stepper">${STEPS.map(([k, l], i) => `<div class="${i < idx ? "done" : i === idx ? "on" : ""}">${esc(l)}</div>`).join("")}</div>`;
+    const steps = job.url ? STEPS : STEPS.slice(1);
+    const idx = steps.findIndex(([k]) => k === job.step);
+    st.innerHTML = `<div class="progress-big">${esc(steps[Math.max(0, idx)]?.[1] || "Queued")}… ${Math.round(job.progress || 0)}%</div>
+      <div class="stepper" style="grid-template-columns:repeat(${steps.length},minmax(0,1fr))">${steps.map(([k, l], i) => `<div class="${i < idx ? "done" : i === idx ? "on" : ""}">${esc(l)}</div>`).join("")}</div>`;
   } else {
     st.innerHTML = (job.notes || []).map((n) => `<div class="banner">${esc(n)}</div>`).join("");
   }
@@ -259,7 +304,7 @@ function makeCard(c) {
       <div class="bars"></div>
       <div>
         <div class="row" style="justify-content:space-between;margin-bottom:6px">
-          <div class="tabs"><button class="on" data-p="tiktok">TikTok</button><button data-p="instagram">Instagram</button><button data-p="youtube">YouTube</button></div>
+          <div class="tabs"><button class="on" data-p="tiktok">TikTok</button><button data-p="instagram">Instagram</button><button data-p="youtube">YouTube</button><button data-p="x">X</button></div>
           <button class="btn btn-ghost btn-sm copy" style="flex:0">Copy</button>
         </div>
         <div class="captext"></div>
