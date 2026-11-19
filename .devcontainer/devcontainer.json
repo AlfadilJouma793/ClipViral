@@ -1,0 +1,32 @@
+{
+  "name": "ClipViral",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb"
+  },
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg && (sudo apt-get install -y --no-install-recommends fonts-inter || echo 'Inter font unavailable, using fallback') && pip install -r requirements.txt",
+  "postAttachCommand": "python -m uvicorn clipviral.main:app --host 0.0.0.0 --port 8000",
+  "forwardPorts": [
+    8000
+  ],
+  "portsAttributes": {
+    "8000": {
+      "label": "ClipViral",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "secrets": {
+    "ANTHROPIC_API_KEY": {
+      "description": "Optional. Your Anthropic API key, for AI-picked clips, hooks and captions.",
+      "documentationUrl": "https://console.anthropic.com/settings/keys"
+    }
+  },
+  "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "README.md"
+      ]
+    }
+  }
+}

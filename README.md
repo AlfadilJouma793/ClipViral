@@ -23,6 +23,13 @@ Upload → transcribe every word → find the best moments → reframe to 9:16 a
 
 ## Run locally
 
+### In the browser with GitHub Codespaces (nothing to install)
+
+1. Optional: add your Anthropic key at GitHub **Settings → Codespaces → Secrets → New secret**, named `ANTHROPIC_API_KEY`, with access to this repo.
+2. On the repo page, click **Code → Codespaces → Create codespace on main**.
+3. Wait for setup (about 3–5 minutes the first time). The app starts by itself and opens in a new tab. If it doesn't, open the **Ports** tab and click the globe icon next to port 8000, then add `/studio` to the address.
+4. When you're finished, stop the codespace (**Code → Codespaces → … → Stop**) so it doesn't use your free hours.
+
 ### Mac: one click
 
 1. Download the project (green **Code** button on GitHub, then **Download ZIP**) and unzip it.
