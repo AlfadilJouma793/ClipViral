@@ -4,20 +4,6 @@ from generic clippers."""
 from __future__ import annotations
 
 NICHES: dict[str, dict] = {
-    "podcast": {
-        "label": "Podcasters",
-        "blurb": "Hot takes, stories and quotable one-liners from long conversations.",
-        "guidance": (
-            "Favour self-contained stories, strong opinions, surprising facts, funny "
-            "exchanges and quotable one-liners. A clip must make sense to someone who "
-            "has never heard the show. Avoid housekeeping (sponsors, intros, 'subscribe')."
-        ),
-        "keywords": ["story", "never", "honestly", "crazy", "truth", "secret", "mistake",
-                     "biggest", "worst", "best", "changed", "realised", "realized", "nobody"],
-        "hashtags": ["podcast", "podcastclips", "storytime"],
-        "style": "bold",
-        "layout": "auto",
-    },
     "youtuber": {
         "label": "YouTubers",
         "blurb": "Shorts that tease the full video and pull viewers back to the channel.",
@@ -30,38 +16,6 @@ NICHES: dict[str, dict] = {
                      "wow", "test", "actually", "reveal", "won", "lost"],
         "hashtags": ["shorts", "youtubeshorts", "viral"],
         "style": "bold",
-        "layout": "auto",
-    },
-    "property_uk": {
-        "label": "UK property agents",
-        "blurb": "Viewings, market updates and buyer/seller tips that win instructions.",
-        "guidance": (
-            "Audience: UK home buyers, sellers, landlords and tenants. Favour practical "
-            "tips (stamp duty, mortgages, EPC ratings, surveys, chains, offers, rental "
-            "yields), standout property features from tours, local area insight and "
-            "market updates. Use UK English and £. Never invent prices or legal/financial "
-            "promises; hooks must stay accurate and compliant (no guaranteed returns)."
-        ),
-        "keywords": ["stamp duty", "mortgage", "offer", "buyers", "sellers", "landlord",
-                     "tenant", "rent", "yield", "epc", "survey", "chain", "asking price",
-                     "valuation", "garden", "kitchen", "bedroom", "freehold", "leasehold",
-                     "market", "interest rate", "first-time", "£"],
-        "hashtags": ["ukproperty", "propertytips", "estateagent", "househunting"],
-        "style": "boxed",
-        "layout": "auto",
-    },
-    "coach": {
-        "label": "Coaches & course creators",
-        "blurb": "Bite-size lessons and frameworks that sell the full programme.",
-        "guidance": (
-            "Favour clear frameworks, step-by-step advice, mindset reframes, client "
-            "transformations and contrarian lessons. Every clip should teach one thing "
-            "and leave the viewer wanting the full course."
-        ),
-        "keywords": ["step", "framework", "mistake", "lesson", "clients", "simple", "rule",
-                     "secret", "habit", "mindset", "stop", "start", "results", "first"],
-        "hashtags": ["coaching", "mindset", "businesstips"],
-        "style": "karaoke",
         "layout": "auto",
     },
     "agency": {

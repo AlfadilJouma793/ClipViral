@@ -72,7 +72,7 @@ def test_sentences_split_on_punctuation(words):
 def test_heuristic_plan_returns_non_overlapping_sentence_aligned_clips(words):
     sents = transcribe.sentences(words)
     curve = np.full(200, -20.0)
-    clips = highlights.heuristic_plan(sents, words, curve, "property_uk", 3, 5, 12)
+    clips = highlights.heuristic_plan(sents, words, curve, "general", 3, 5, 12)
     assert clips
     starts = {s["s"] for s in sents}
     ends = {s["e"] for s in sents}
@@ -107,7 +107,7 @@ def test_claude_plan_maps_sentence_ranges_to_times(monkeypatch, words):
 
     import anthropic
     monkeypatch.setattr(anthropic, "Anthropic", FakeClient)
-    clips = highlights.claude_plan(sents, np.full(200, -20.0), "property_uk", 3, 5, 12)
+    clips = highlights.claude_plan(sents, np.full(200, -20.0), "general", 3, 5, 12)
     assert len(clips) == 1  # duplicate overlapping pick dropped
     c = clips[0]
     assert c["start"] == sents[0]["s"] and c["end"] == sents[1]["e"]
@@ -513,10 +513,10 @@ def test_broll_plan_fetch_and_render(monkeypatch, tmp_path, words):
     monkeypatch.setattr(broll, "search", fake_search)
 
     rel = render.clip_words(words, 1.0, 23.0)
-    planned = broll.plan_offline(rel, "property_uk")
+    planned = broll.plan_offline(rel, "general")
     assert planned and all(rel[i]["s"] >= 3.0 for i, _ in planned)
     assert len({round(rel[i]["s"]) for i, _ in planned}) == len(planned)
-    items = broll.build(rel, 1.0, "property_uk", (1080, 1920))
+    items = broll.build(rel, 1.0, "general", (1080, 1920))
     assert items and searches[0][1] == "portrait"
     assert items[0]["credit"]["name"] == "Ann" and Path(items[0]["path"]).exists()
     assert len({it["pexels_id"] for it in items}) == len(items)  # no repeated stock clip

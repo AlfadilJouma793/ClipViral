@@ -372,7 +372,7 @@ async function drawApiTab(body) {
     <div id="keyOut"></div>
     <label class="f">Example</label>
     <pre class="code">curl -H "Authorization: Bearer cv_live_..." \
-  -F url=https://www.youtube.com/watch?v=VIDEO -F rights=true -F niche=podcast \
+  -F url=https://www.youtube.com/watch?v=VIDEO -F rights=true -F niche=general \
   ${esc(origin)}/api/jobs
 
 curl -H "Authorization: Bearer cv_live_..." ${esc(origin)}/api/jobs/JOB_ID</pre>

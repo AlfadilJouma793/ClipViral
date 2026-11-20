@@ -14,7 +14,7 @@ Upload or paste a link → transcribe every word → find the best moments → r
 | **"Why this works"** | Every clip gets a 0–100 score with a hook / flow / value / trend breakdown and a plain-English reason. |
 | **Camera-operator reframing** | Face tracking with a dead-zone: the crop holds steady, eases when the speaker moves, and snaps on camera cuts. No faces (slides, screen share)? It fits the frame over a blurred background instead. |
 | **Dead-air removal** | Long pauses inside a clip are cut and the captions re-timed. |
-| **Niche presets** | Podcasters, YouTubers, **UK property agents** (stamp duty, EPC, chains; compliance-safe hooks), coaches, agencies. You can also tell the AI what to look for. |
+| **Audience presets** | YouTubers, agencies, TikTok, Instagram, X or general. You can also tell the AI what to look for. |
 | **5 caption styles** | Bold Pop, Karaoke, Boxed, Minimal, Neon. Word-by-word highlighting, keyword emphasis, brand colour, @handle watermark, progress bar. |
 | **Post copy included** | A TikTok caption, Instagram caption, YouTube Shorts title and X post for each clip. SRT per clip, and a ZIP export with everything. |
 | **Platform audio** | Loudness normalised to −14 LUFS. |
