@@ -48,7 +48,6 @@ async function init() {
   $("#pmClose").onclick = () => { $("#postModal").hidden = true; };
   $("#postModal").onclick = (e) => { if (e.target.id === "postModal") $("#postModal").hidden = true; };
   $("#maxgb").textContent = state.cfg.max_upload_gb;
-  $("#maxmin").textContent = state.cfg.max_video_minutes;
 
   const nEl = $("#niches");
   state.cfg.niches.forEach((n) => {
@@ -116,8 +115,9 @@ async function init() {
   drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); setFile(e.dataTransfer.files[0]); };
   $("#newForm").onsubmit = (e) => { e.preventDefault(); upload(); };
 
-  document.querySelectorAll("#newForm .seg button").forEach((b) => b.onclick = () => setSource(b.dataset.src));
-  $("#url").oninput = updateGo;
+  $("#url").oninput = () => {
+    if ($("#url").value.trim()) { clearFile(); setSource("link"); } else setSource(state.file ? "file" : "link");
+  };
   $("#rights").onchange = updateGo;
   if (!state.cfg.links) $('.seg [data-src="link"]').title = "Link import isn't installed on this server";
   // Pasting a link anywhere on the page switches to link mode.
@@ -125,23 +125,24 @@ async function init() {
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
     const text = (e.clipboardData?.getData("text") || "").trim();
-    if (/^https?:\/\/\S+$/i.test(text)) { setSource("link"); $("#url").value = text; updateGo(); $("#rights").focus(); }
+    if (/^https?:\/\/\S+$/i.test(text)) { clearFile(); $("#url").value = text; setSource("link"); $("#rights").focus(); }
   });
 
   banners();
   await loadProjects();
   const want = location.hash.slice(1);
   if (want) openJob(want);
+  window.addEventListener("hashchange", () => {
+    const id = location.hash.slice(1);
+    if (id && id !== state.jobId) openJob(id);
+  });
 }
 
 function banners() {
   const b = $("#banners");
   b.innerHTML = "";
-  if (!state.cfg.ai) {
-    b.insertAdjacentHTML("beforeend", `<div class="banner">Running in <b>offline scoring mode</b>: clips are ranked by hook words, vocal energy, pace and payoff. Set <code>ANTHROPIC_API_KEY</code> on the server for Claude-picked moments, written hooks and platform captions.</div>`);
-  }
   if (!state.cfg.whisper) {
-    b.insertAdjacentHTML("beforeend", `<div class="banner warn">Speech-to-text isn't installed on this server. Upload an .srt or .vtt transcript with your video (More options).</div>`);
+    b.insertAdjacentHTML("beforeend", `<div class="banner warn">Automatic subtitles aren't available right now. Add a subtitle file (.srt) under Customise.</div>`);
   }
 }
 
@@ -496,12 +497,14 @@ function selectStyle(k) {
 }
 
 function setSource(src) {
+  // one box for both: a chosen file or a pasted link decides the source
   state.src = src;
-  document.querySelectorAll("#newForm .seg button").forEach((b) => b.classList.toggle("on", b.dataset.src === src));
-  $("#linkBox").hidden = src !== "link";
-  $("#drop").hidden = src !== "file";
-  if (src === "link") $("#url").focus();
+  $("#rightsRow").hidden = !(src === "link" && $("#url").value.trim());
   updateGo();
+}
+
+function clearFile() {
+  state.file = null; $("#file").value = ""; $("#fileName").textContent = "";
 }
 
 const validUrl = (u) => /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(u.trim());
@@ -513,6 +516,8 @@ function updateGo() {
 function setFile(f) {
   if (!f) return;
   state.file = f;
+  $("#url").value = "";
+  setSource("file");
   $("#fileName").textContent = `${f.name} · ${(f.size / 1024 / 1024).toFixed(0)} MB`;
   updateGo();
 }
@@ -567,7 +572,7 @@ function upload() {
       const job = JSON.parse(xhr.responseText);
       msg.textContent = "";
       refreshMe().catch(() => {});
-      if (linkMode) { $("#url").value = ""; $("#rights").checked = false; }
+      if (linkMode) { $("#url").value = ""; $("#rights").checked = false; $("#rightsRow").hidden = true; }
       else { state.file = null; $("#file").value = ""; $("#fileName").textContent = ""; }
       updateGo();
       await loadProjects();
@@ -696,24 +701,29 @@ function makeCard(c) {
     </div>
     <div class="body">
       <h3></h3>
-      <p class="why"></p>
-      <div class="bars"></div>
-      <div>
-        <div class="row" style="justify-content:space-between;margin-bottom:6px">
-          <div class="tabs"><button class="on" data-p="tiktok">TikTok</button><button data-p="instagram">Instagram</button><button data-p="youtube">YouTube</button><button data-p="x">X</button></div>
-          <button class="btn btn-ghost btn-sm copy" style="flex:0">Copy</button>
-        </div>
-        <div class="captext"></div>
-      </div>
-      <div class="small credits" hidden></div>
       <div class="actions">
-        <a class="btn btn-primary btn-sm dl">⬇ MP4</a>
-        <a class="btn btn-ghost btn-sm srt">SRT</a>
-        <button class="btn btn-ghost btn-sm edit">✎ Edit</button>
+        <a class="btn btn-primary btn-sm dl">⬇ Download</a>
         <button class="btn btn-ghost btn-sm post">📤 Post</button>
+        <button class="btn btn-ghost btn-sm edit">✎ Edit</button>
       </div>
+      <details class="why-box">
+        <summary>Why this clip · captions</summary>
+        <div>
+          <p class="why"></p>
+          <div class="bars"></div>
+          <div>
+            <div class="row" style="justify-content:space-between;margin-bottom:6px">
+              <div class="tabs"><button class="on" data-p="tiktok">TikTok</button><button data-p="instagram">Instagram</button><button data-p="youtube">YouTube</button><button data-p="x">X</button></div>
+              <button class="btn btn-ghost btn-sm copy" style="flex:0">Copy</button>
+            </div>
+            <div class="captext"></div>
+          </div>
+          <div class="small credits" hidden></div>
+          <a class="small srt" style="color:var(--muted)">Download subtitles (.srt)</a>
+        </div>
+      </details>
       <div class="editbox">
-        <label class="f" style="margin-top:0">Hook headline</label>
+        <label class="f" style="margin-top:0">Headline</label>
         <input type="text" class="e-hook" maxlength="80">
         <div class="row">
           <select class="e-style" aria-label="Caption style"></select>
@@ -721,25 +731,29 @@ function makeCard(c) {
           <input type="color" class="e-accent" aria-label="Accent colour">
         </div>
         <div class="row">
-          <select class="e-layout" aria-label="Framing"></select>
           <label class="toggle" style="flex:0 0 auto;gap:8px">Emojis <input type="checkbox" class="e-emojis"></label>
           <label class="toggle" style="flex:0 0 auto;gap:8px">B-roll <input type="checkbox" class="e-broll"></label>
         </div>
-        <div class="reframe" hidden>
-          <div class="small" style="margin-bottom:6px">Drag the box to choose what stays in frame.</div>
-          <div class="rf-wrap"><img class="rf-img" alt="Source frame"><div class="rf-box"></div></div>
-        </div>
-        <label class="f">Transcript editor</label>
-        <div class="tmode">
-          <button type="button" class="on" data-m="cut">✂ Cut words</button>
-          <button type="button" data-m="start">⇤ Set start</button>
-          <button type="button" data-m="end">⇥ Set end</button>
-        </div>
+        <label class="f">Cut words</label>
         <div class="words"><div class="small">Loading transcript…</div></div>
-        <div class="small">Click words to remove them (shift-click selects a range). Grey words are outside the clip; use Set start / Set end to include them.</div>
-        <div class="trim"><span>Start</span><span class="e-s"></span><button type="button" data-d="-1" data-k="start">−1s</button><button type="button" data-d="1" data-k="start">+1s</button></div>
-        <div class="trim"><span>End</span><span class="e-e"></span><button type="button" data-d="-1" data-k="end">−1s</button><button type="button" data-d="1" data-k="end">+1s</button></div>
-        <button type="button" class="btn btn-primary btn-sm apply">Re-render clip</button>
+        <div class="small">Click a word to remove it (shift-click for a range). Grey words are outside the clip.</div>
+        <details class="more">
+          <summary>More options</summary>
+          <div class="tmode" style="margin-top:10px">
+            <button type="button" class="on" data-m="cut">✂ Cut words</button>
+            <button type="button" data-m="start">⇤ Set start</button>
+            <button type="button" data-m="end">⇥ Set end</button>
+          </div>
+          <div class="trim" style="margin-top:10px"><span>Start</span><span class="e-s"></span><button type="button" data-d="-1" data-k="start">−1s</button><button type="button" data-d="1" data-k="start">+1s</button></div>
+          <div class="trim"><span>End</span><span class="e-e"></span><button type="button" data-d="-1" data-k="end">−1s</button><button type="button" data-d="1" data-k="end">+1s</button></div>
+          <label class="f">Framing</label>
+          <select class="e-layout" aria-label="Framing"></select>
+          <div class="reframe" hidden style="margin-top:10px">
+            <div class="small" style="margin-bottom:6px">Drag the box to choose what stays in frame.</div>
+            <div class="rf-wrap"><img class="rf-img" alt="Source frame"><div class="rf-box"></div></div>
+          </div>
+        </details>
+        <button type="button" class="btn btn-primary btn-sm apply">Save changes</button>
       </div>
     </div>`;
   const card = { el, platform: "tiktok", version: -1, draft: null, words: [], mode: "cut", lastIdx: null };
@@ -794,7 +808,7 @@ function makeCard(c) {
     try {
       await api(`/api/jobs/${state.jobId}/clips/${c.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       $(".editbox", el).classList.remove("open");
-      toast("Re-rendering clip…");
+      toast("Updating clip…");
       refresh();
     } catch (e) { toast(e.message); }
   };

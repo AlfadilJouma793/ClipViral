@@ -26,85 +26,80 @@
   <aside class="side">
     <form class="panel" id="newForm">
       <h2>New project</h2>
-      <div class="seg" role="tablist">
-        <button type="button" class="on" data-src="file" role="tab">⬆ Upload file</button>
-        <button type="button" data-src="link" role="tab">🔗 Paste link</button>
-      </div>
-      <div id="linkBox" hidden>
-        <input type="url" id="url" placeholder="https://youtube.com/watch?v=…" autocomplete="off" inputmode="url">
-        <div class="small" style="margin-top:8px">YouTube, Vimeo, TikTok, Instagram, X, Facebook, Twitch, Dropbox, or any direct video link. Up to <span id="maxmin">180</span> minutes.</div>
-        <label class="toggle" style="align-items:flex-start;gap:10px;justify-content:flex-start">
-          <input type="checkbox" id="rights" style="margin-top:2px;flex:0 0 18px">
-          <span style="font-size:13px;color:var(--muted)">I own this video or have permission to repurpose it.</span>
-        </label>
-      </div>
       <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose a video file">
-        <b>Drop your long video here</b>
-        <span>MP4, MOV, MKV, WEBM · up to <span id="maxgb">8</span> GB</span>
+        <div class="drop-ico">⬆</div>
+        <b>Drop a video here</b>
+        <span>or click to choose a file · up to <span id="maxgb">8</span> GB</span>
         <div class="file" id="fileName"></div>
         <input type="file" id="file" accept="video/*,.mkv" hidden>
       </div>
+      <div class="or"><span>or paste a link</span></div>
+      <input type="url" id="url" placeholder="YouTube, TikTok, Vimeo, Dropbox… link" autocomplete="off" inputmode="url" aria-label="Video link">
+      <label class="toggle rights" id="rightsRow" hidden>
+        <input type="checkbox" id="rights">
+        <span>I own this video or have permission to use it</span>
+      </label>
 
-      <label class="f">Who is it for?</label>
+      <label class="f">Optimise for</label>
       <div class="chips" id="niches"></div>
-
-      <label class="f">Brand template</label>
-      <div class="row">
-        <select id="brand" aria-label="Brand template"><option value="">No template</option></select>
-        <button type="button" class="btn btn-ghost btn-sm" id="manageBrands" style="flex:0 0 auto">Manage</button>
-      </div>
-
-      <label class="f">Shape</label>
-      <div class="chips" id="aspects"></div>
-
-      <label class="f">Clip length</label>
-      <div class="chips" id="lengths">
-        <button type="button" class="chip" data-v="15,30">15–30s</button>
-        <button type="button" class="chip on" data-v="20,60">20–60s</button>
-        <button type="button" class="chip" data-v="30,90">30–90s</button>
-        <button type="button" class="chip" data-v="60,180">1–3 min</button>
-        <button type="button" class="chip" data-v="180,900">3–15 min</button>
-      </div>
-
-      <label class="f">Number of clips: <span id="numOut">8</span></label>
-      <input type="range" id="num" min="1" max="20" value="8">
 
       <label class="f">Caption style</label>
       <div class="chips" id="styles"></div>
 
-      <label class="f">Brand colour & watermark</label>
-      <div class="row">
-        <input type="color" id="accent" value="#ffe14d" aria-label="Accent colour">
-        <input type="text" id="watermark" placeholder="@yourhandle (optional)" maxlength="40">
-      </div>
+      <button class="btn btn-primary btn-big" id="go" disabled>Make my clips</button>
+      <div class="upbar" id="upbar"><div></div></div>
+      <div class="small" id="upmsg" style="margin-top:8px"></div>
 
-      <label class="toggle" style="margin-top:8px">Emojis on captions <input type="checkbox" id="emojis"></label>
-      <label class="toggle">AI B-roll cutaways <input type="checkbox" id="broll"></label>
-      <div class="small" id="brollNote" hidden>B-roll needs a free Pexels API key on the server (PEXELS_API_KEY).</div>
+      <details class="more" id="customise">
+        <summary>Customise (optional)</summary>
+        <label class="f">Brand template</label>
+        <div class="row">
+          <select id="brand" aria-label="Brand template"><option value="">No template</option></select>
+          <button type="button" class="btn btn-ghost btn-sm" id="manageBrands" style="flex:0 0 auto">Manage</button>
+        </div>
 
-      <details class="more">
-        <summary>More options</summary>
-        <label class="f">Framing</label>
-        <select id="layout"></select>
-        <label class="f">Caption position</label>
-        <select id="position"><option value="lower">Lower third</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select>
-        <label class="f">Tell the AI what to look for</label>
-        <textarea id="prompt" maxlength="500" placeholder="e.g. Only the parts about pricing and customer stories"></textarea>
-        <label class="f">Language (blank = auto-detect)</label>
-        <input type="text" id="language" placeholder="en, es, fr, ar…" maxlength="5">
-        <label class="f">Existing transcript (optional .srt / .vtt)</label>
-        <input type="file" id="transcript" accept=".srt,.vtt">
+        <label class="f">Shape</label>
+        <div class="chips" id="aspects"></div>
+
+        <label class="f">Clip length</label>
+        <div class="chips" id="lengths">
+          <button type="button" class="chip" data-v="15,30">15–30s</button>
+          <button type="button" class="chip on" data-v="20,60">20–60s</button>
+          <button type="button" class="chip" data-v="30,90">30–90s</button>
+          <button type="button" class="chip" data-v="60,180">1–3 min</button>
+          <button type="button" class="chip" data-v="180,900">3–15 min</button>
+        </div>
+
+        <label class="f">Number of clips: <span id="numOut">8</span></label>
+        <input type="range" id="num" min="1" max="20" value="8" aria-label="Number of clips">
+
+        <label class="f">Colour &amp; watermark</label>
+        <div class="row">
+          <input type="color" id="accent" value="#ffe14d" aria-label="Accent colour">
+          <input type="text" id="watermark" placeholder="@yourhandle" maxlength="40" aria-label="Watermark">
+        </div>
+
         <div style="margin-top:10px">
+          <label class="toggle">Emojis on captions <input type="checkbox" id="emojis"></label>
+          <label class="toggle">AI B-roll cutaways <input type="checkbox" id="broll"></label>
+          <div class="small" id="brollNote" hidden>B-roll isn't available on this server yet.</div>
           <label class="toggle">Remove long pauses <input type="checkbox" id="tighten" checked></label>
           <label class="toggle">Cut filler words (um, uh) <input type="checkbox" id="cutFillers" checked></label>
           <label class="toggle">Hook headline on screen <input type="checkbox" id="showHook" checked></label>
           <label class="toggle">Progress bar <input type="checkbox" id="progressBar" checked></label>
         </div>
-      </details>
 
-      <button class="btn btn-primary" style="width:100%;margin-top:18px" id="go" disabled>Find my clips</button>
-      <div class="upbar" id="upbar"><div></div></div>
-      <div class="small" id="upmsg" style="margin-top:8px"></div>
+        <label class="f">Framing</label>
+        <select id="layout" aria-label="Framing"></select>
+        <label class="f">Caption position</label>
+        <select id="position" aria-label="Caption position"><option value="lower">Lower third</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select>
+        <label class="f">Tell the AI what to look for</label>
+        <textarea id="prompt" maxlength="500" placeholder="e.g. Only the parts about pricing and customer stories"></textarea>
+        <label class="f">Language (blank = automatic)</label>
+        <input type="text" id="language" placeholder="en, es, fr, ar…" maxlength="5">
+        <label class="f">Existing subtitles (.srt / .vtt)</label>
+        <input type="file" id="transcript" accept=".srt,.vtt">
+      </details>
     </form>
 
     <div class="panel">
@@ -116,8 +111,13 @@
   <main class="main" id="main">
     <div id="banners"></div>
     <div class="empty" id="empty">
-      <h2>Drop in a long video or paste a link</h2>
-      <p>Your ranked, captioned, ready-to-post clips will appear here.</p>
+      <h2>Turn one long video into short clips</h2>
+      <div class="steps3">
+        <div><b>1</b><span>Add a video or paste a link</span></div>
+        <div><b>2</b><span>Choose where you'll post</span></div>
+        <div><b>3</b><span>Press <i>Make my clips</i></span></div>
+      </div>
+      <p>Your best moments appear here, captioned and ready to download or post.</p>
     </div>
     <div id="job" hidden></div>
   </main>

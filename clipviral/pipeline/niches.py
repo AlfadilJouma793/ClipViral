@@ -5,7 +5,7 @@ from __future__ import annotations
 
 NICHES: dict[str, dict] = {
     "youtuber": {
-        "label": "YouTubers",
+        "label": "YouTube",
         "blurb": "Shorts that tease the full video and pull viewers back to the channel.",
         "guidance": (
             "Pick moments with high energy, reveals, results, before/after, reactions "
@@ -19,7 +19,7 @@ NICHES: dict[str, dict] = {
         "layout": "auto",
     },
     "agency": {
-        "label": "Marketing agencies",
+        "label": "Agency clients",
         "blurb": "Volume-ready clips with brand watermarks for every client.",
         "guidance": (
             "Pick on-brand, polished moments with clear value propositions, social proof, "
@@ -32,7 +32,7 @@ NICHES: dict[str, dict] = {
         "layout": "auto",
     },
     "tiktok": {
-        "label": "TikTok creators",
+        "label": "TikTok",
         "blurb": "Fast, punchy clips that hook in the first second and loop well.",
         "guidance": (
             "Optimise for TikTok's For You page: the first sentence must hook within about "
@@ -49,7 +49,7 @@ NICHES: dict[str, dict] = {
         "lengths": [15, 30],
     },
     "instagram": {
-        "label": "Instagram creators",
+        "label": "Instagram",
         "blurb": "Polished, relatable Reels people save and share.",
         "guidance": (
             "Optimise for Instagram Reels: favour relatable, aspirational or genuinely useful "
@@ -66,7 +66,7 @@ NICHES: dict[str, dict] = {
         "lengths": [20, 60],
     },
     "x": {
-        "label": "X (Twitter)",
+        "label": "X",
         "blurb": "Opinionated, newsworthy clips that spark replies and reposts.",
         "guidance": (
             "Optimise for X (Twitter): favour strong opinions, hot takes, news commentary, "
@@ -83,7 +83,7 @@ NICHES: dict[str, dict] = {
         "lengths": [30, 90],
     },
     "general": {
-        "label": "Everyone else",
+        "label": "Anywhere",
         "blurb": "Balanced settings for any talking-head or interview video.",
         "guidance": "Pick the most engaging, self-contained and shareable moments.",
         "keywords": ["never", "secret", "best", "worst", "mistake", "truth", "how", "why"],
@@ -98,7 +98,11 @@ def get_niche(key: str | None) -> dict:
     return NICHES.get(key or "general", NICHES["general"])
 
 
+ORDER = ["general", "tiktok", "instagram", "youtuber", "x", "agency"]
+
+
 def public_niches() -> list[dict]:
+    keys = [k for k in ORDER if k in NICHES] + [k for k in NICHES if k not in ORDER]
     return [{"key": k, "label": v["label"], "blurb": v["blurb"],
              "style": v["style"], "layout": v["layout"], "lengths": v.get("lengths")}
-            for k, v in NICHES.items()]
+            for k, v in ((k, NICHES[k]) for k in keys)]
