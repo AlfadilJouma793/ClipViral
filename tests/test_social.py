@@ -122,7 +122,7 @@ def test_connect_urls_and_state(env, ws):
 
 def test_unconfigured_platform(env, ws, monkeypatch):
     monkeypatch.delenv("X_CLIENT_SECRET")
-    with pytest.raises(social.SocialError, match="isn't set up"):
+    with pytest.raises(social.SocialError, match="isn't available"):
         social.start_connect("x", ws[1], ws[2], "https://a/cb")
 
 

@@ -54,7 +54,7 @@ def checkout_url(ws: dict, user: dict, plan: str, base_url: str) -> str:
     if plan not in PAID:
         raise ValueError("Unknown plan")
     if not enabled():
-        raise RuntimeError("Billing isn't configured on this server yet.")
+        raise RuntimeError("Upgrades aren't available yet.")
     stripe = _stripe()
     base = public_url(base_url)
     params = {
@@ -77,7 +77,7 @@ def checkout_url(ws: dict, user: dict, plan: str, base_url: str) -> str:
 
 def portal_url(ws: dict, base_url: str) -> str:
     if not enabled():
-        raise RuntimeError("Billing isn't configured on this server yet.")
+        raise RuntimeError("Upgrades aren't available yet.")
     if not ws.get("stripe_customer_id"):
         raise RuntimeError("This workspace has no subscription yet.")
     stripe = _stripe()

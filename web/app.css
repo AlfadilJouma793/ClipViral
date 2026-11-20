@@ -151,7 +151,7 @@ footer .wrap { display: flex; justify-content: space-between; gap: 20px; flex-wr
   .steps, .features, .pricing { grid-template-columns: 1fr 1fr; }
   .niches { grid-template-columns: 1fr 1fr; }
   .feature.wide { grid-column: span 2; }
-  .nav .links a:not(.btn) { display: none; }
+  .nav .links a.sec { display: none; }
 }
 @media (max-width: 620px) {
   .steps, .features, .pricing, .niches { grid-template-columns: 1fr; }
@@ -320,8 +320,17 @@ input[type=url]:focus { border-color: var(--amber); }
 .keybox { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: var(--bg-2); border: 1px solid var(--amber); border-radius: 10px;
   padding: 10px; word-break: break-all; margin: 8px 0; }
 pre.code { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 12px; overflow-x: auto; color: #d9d8e3; }
-@media (max-width: 900px) { .plan-grid { grid-template-columns: 1fr 1fr; } .acct #logout { display: none; } }
-@media (max-width: 620px) { .plan-grid { grid-template-columns: 1fr; } .acct #wsSwitch { display: none; } }
+@media (max-width: 900px) { .plan-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 620px) {
+  .plan-grid { grid-template-columns: 1fr; }
+  .nav .wrap { gap: 10px; }
+  .nav .logo .pill, .usage-pill .plan-name, .acct #logout { display: none; }
+  .acct { gap: 8px; }
+  .acct #wsSwitch { max-width: 110px; }
+  .usage-pill { padding: 7px 10px; }
+  .modal { padding: 16px; }
+  #settingsModal .seg { grid-template-columns: 1fr 1fr !important; }
+}
 
 /* simple new-project panel */
 .drop { padding: 30px 16px; }

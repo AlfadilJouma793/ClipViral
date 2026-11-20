@@ -490,7 +490,7 @@ def start_connect(platform: str, workspace_id: str, user_id: str, redirect_uri: 
     if not p:
         raise SocialError("Unknown platform.")
     if not p.configured():
-        raise SocialError(f"{p.label} isn't set up on this server yet (missing app credentials).")
+        raise SocialError(f"Posting to {p.label} isn't available yet.")
     state = secrets.token_urlsafe(24)
     verifier, challenge = _pkce()
     with accounts.db() as con:

@@ -29,7 +29,9 @@ async function init() {
   state.me = await api("/api/me");
   state.cfg = await api("/api/config");
   drawAccount();
-  $("#logout").onclick = async () => { await fetch("/api/auth/logout", { method: "POST" }); location.href = "/"; };
+  const doLogout = async () => { await fetch("/api/auth/logout", { method: "POST" }); location.href = "/"; };
+  $("#logout").onclick = doLogout;
+  $("#stLogout").onclick = doLogout;
   $("#openSettings").onclick = () => openSettings("plan");
   $("#usagePill").onclick = () => openSettings("plan");
   $("#stClose").onclick = closeSettings;
@@ -119,7 +121,7 @@ async function init() {
     if ($("#url").value.trim()) { clearFile(); setSource("link"); } else setSource(state.file ? "file" : "link");
   };
   $("#rights").onchange = updateGo;
-  if (!state.cfg.links) $('.seg [data-src="link"]').title = "Link import isn't installed on this server";
+  if (!state.cfg.links) { $("#url").disabled = true; $("#url").placeholder = "Pasting links isn't available yet"; }
   // Pasting a link anywhere on the page switches to link mode.
   document.addEventListener("paste", (e) => {
     const t = e.target;
@@ -150,7 +152,7 @@ function banners() {
 function drawAccount() {
   const m = state.me, u = m.usage;
   const pill = $("#usagePill");
-  pill.innerHTML = `${esc(u.plan.label)} · <b>${Math.round(u.minutes_used)}</b> / ${u.minutes_limit} min`;
+  pill.innerHTML = `<span class="plan-name">${esc(u.plan.label)} · </span><b>${Math.round(u.minutes_used)}</b> / ${u.minutes_limit} min`;
   pill.classList.toggle("low", u.minutes_left < Math.max(5, u.minutes_limit * 0.1));
   const sel = $("#wsSwitch");
   sel.hidden = m.workspaces.length < 2;
@@ -193,7 +195,7 @@ async function drawPlanTab(body) {
       <div class="meter"><div style="width:${pct}%"></div></div>
       <div class="small">${Math.round(u.minutes_used)} of ${u.minutes_limit} video minutes used · resets ${esc(reset)}</div>
     </div>
-    ${!b.enabled ? `<div class="banner" style="margin-top:14px">Online payments aren't set up on this server yet (Stripe keys missing).</div>` : ""}
+    ${!b.enabled ? `<div class="banner" style="margin-top:14px">Upgrades are coming soon.</div>` : ""}
     ${!owner ? `<div class="small" style="margin-top:10px">Only the workspace owner can change the plan.</div>` : ""}
     <div class="plan-grid">${order.map((k) => {
       const p = b.plans[k], cur = k === u.plan.key;
@@ -237,7 +239,7 @@ async function drawSocialTab(body) {
     <p class="small" style="margin-top:14px">Connect your accounts to publish clips straight from ClipViral, now or on a schedule.${o.allowed ? "" : " <b>Publishing is included in the Starter plan and above.</b>"}</p>
     ${o.platforms.map((p) => `<div class="list-row"><span><b>${PLATFORM_ICON[p.key]} ${esc(p.label)}</b>
         ${byPlat(p.key).map((c) => `<span class="pill" style="margin-left:6px">${esc(c.account_name)} <a href="#" data-disc="${esc(c.id)}" title="Disconnect" style="margin-left:4px">✕</a></span>`).join("")}
-        ${p.configured ? "" : `<span class="small"> · not set up on this server</span>`}</span>
+        ${p.configured ? "" : `<span class="small"> · coming soon</span>`}</span>
       <button type="button" class="btn btn-ghost btn-sm" data-connect="${p.key}" ${p.configured && o.allowed ? "" : "disabled"}>${byPlat(p.key).length ? "Add account" : "Connect"}</button></div>`).join("")}
     <label class="f">Posts</label>
     ${posts.length ? posts.map((p) => `<div class="list-row"><span>${PLATFORM_ICON[p.platform] || ""} <b>${esc(p.account_name || p.platform)}</b>
@@ -522,9 +524,35 @@ function setFile(f) {
   updateGo();
 }
 
-function upload() {
+function videoMinutes(file) {
+  // read the length in the browser so we can stop over-limit uploads before sending gigabytes
+  return new Promise((resolve) => {
+    const v = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    const done = (val) => { URL.revokeObjectURL(url); resolve(val); };
+    v.preload = "metadata";
+    v.onloadedmetadata = () => done(isFinite(v.duration) ? v.duration / 60 : null);
+    v.onerror = () => done(null);  // unknown format (e.g. some MKV): let the server check
+    setTimeout(() => done(null), 8000);
+    v.src = url;
+  });
+}
+
+async function upload() {
   const linkMode = state.src === "link";
   if (linkMode ? !validUrl($("#url").value) : !state.file) return;
+  if (!linkMode && state.me) {
+    const mins = await videoMinutes(state.file);
+    const u = state.me.usage;
+    if (mins !== null && mins > u.plan.max_video_minutes) {
+      $("#upmsg").textContent = `This video is ${Math.ceil(mins)} minutes long. Your ${u.plan.label} plan accepts videos up to ${u.plan.max_video_minutes} minutes.`;
+      return;
+    }
+    if (mins !== null && mins > u.minutes_left + 0.05) {
+      $("#upmsg").textContent = `This video is ${Math.ceil(mins)} minutes long but you have ${Math.floor(u.minutes_left)} minutes left this month.`;
+      return;
+    }
+  }
   const fd = new FormData();
   if (linkMode) {
     fd.append("url", $("#url").value.trim());

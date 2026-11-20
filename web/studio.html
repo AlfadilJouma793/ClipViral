@@ -82,7 +82,7 @@
         <div style="margin-top:10px">
           <label class="toggle">Emojis on captions <input type="checkbox" id="emojis"></label>
           <label class="toggle">AI B-roll cutaways <input type="checkbox" id="broll"></label>
-          <div class="small" id="brollNote" hidden>B-roll isn't available on this server yet.</div>
+          <div class="small" id="brollNote" hidden>B-roll is coming soon.</div>
           <label class="toggle">Remove long pauses <input type="checkbox" id="tighten" checked></label>
           <label class="toggle">Cut filler words (um, uh) <input type="checkbox" id="cutFillers" checked></label>
           <label class="toggle">Hook headline on screen <input type="checkbox" id="showHook" checked></label>
@@ -127,7 +127,10 @@
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="stTitle" style="width:min(860px,100%)">
     <div class="row" style="justify-content:space-between">
       <h2 id="stTitle">Settings</h2>
-      <button type="button" class="btn btn-ghost btn-sm" id="stClose" style="flex:0 0 auto">Close</button>
+      <div class="actions" style="flex:0 0 auto">
+        <button type="button" class="btn btn-ghost btn-sm" id="stLogout">Log out</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="stClose">Close</button>
+      </div>
     </div>
     <div class="seg" style="grid-template-columns:repeat(4,1fr);margin-top:10px">
       <button type="button" class="on" data-tab="plan">Plan &amp; billing</button>

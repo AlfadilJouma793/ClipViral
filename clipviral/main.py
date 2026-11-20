@@ -482,6 +482,9 @@ async def create_job(
     if usage["minutes_left"] <= 0:
         raise HTTPException(402, f"You've used all {usage['minutes_limit']} minutes on your "
                                  f"{usage['plan']['label']} plan this month. Upgrade to keep clipping.")
+    language = (language or "").strip().lower()
+    if language and not re.fullmatch(r"[a-z]{2,3}", language):
+        raise HTTPException(400, "Use a short language code like en, es or fr (or leave it blank).")
     has_file = file is not None and bool(file.filename)
     url = url.strip()
     if has_file == bool(url):
