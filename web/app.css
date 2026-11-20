@@ -113,7 +113,7 @@ h2 { font-family: var(--display); font-size: clamp(30px, 4vw, 46px); letter-spac
 .feature p { margin: 0; color: var(--muted); line-height: 1.55; font-size: 15px; }
 .feature.wide { grid-column: span 2; }
 
-.niches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.niches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
 .niche { border-radius: var(--radius); padding: 22px; background: var(--card); border: 1px solid var(--line); }
 .niche b { display: block; font-size: 16px; margin-bottom: 8px; }
 .niche span { color: var(--muted); font-size: 14px; line-height: 1.5; }
